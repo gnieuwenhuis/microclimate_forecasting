@@ -50,3 +50,5 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["network: hits real external services; deselected by default"]
+addopts = "-m 'not network'"

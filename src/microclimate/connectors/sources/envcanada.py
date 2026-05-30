@@ -1,23 +1,388 @@
-"""Environment Canada SWOB (live) + historical climate CSV — deep dual-feed (stub)."""
+"""Environment Canada ECCC bulk hourly CSV observation connector (seam/core split).
+
+Architecture:
+  Seam  — ``_fetch_eccc_csv(station_id, year, month)`` builds the URL + params and
+           calls ``http_get``; ALL network I/O is confined here.
+  Core  — ``_parse_eccc_csv(csv_text, station_id)`` is a pure function: raw CSV text
+           → OBSERVATION_FRAME-valid DataFrame. No network; hammered by unit tests.
+
+Injectable fetcher
+  ``EnvCanadaSource(fetcher=...)`` accepts an optional ``Callable[[str, int, int], str]``
+  (station_id, year, month) → csv_text.  The default (``fetcher=None``) falls through to
+  the real seam.  The registry calls ``EnvCanadaSource()`` with no args, so the default
+  MUST work argument-free.
+
+v1 limitation — LST / UTC offset
+  All v1 ``envcanada`` stations are in Alberta = Mountain Standard Time = UTC−7
+  year-round (no DST).  If ``envcanada`` ever serves non-Alberta stations this
+  module-level offset MUST be revisited.  See ``_LST_UTC_OFFSET`` below.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
+import io
+import math
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
-from microclimate.connectors.base import HistoricalCoverage, ObservationSource
+from microclimate.connectors.base import HistoricalCoverage, ObservationSource, StationNotFound
+from microclimate.connectors.http import http_get
 from microclimate.connectors.registry import register_source
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+_ECCC_URL: str = "https://climate.weather.gc.ca/climate_data/bulk_data_e.html"
+
+# v1 assumption: all envcanada stations are in Alberta (MST = UTC−7, no DST).
+# REVISIT if the envcanada connector is ever extended to non-Alberta (non-MST) stations.
+_LST_UTC_OFFSET: timedelta = timedelta(hours=7)
+
+# Magnus-Tetens coefficients (August-Roche Magnus approximation)
+_MT_A: float = 17.625
+_MT_B: float = 243.04  # °C
+
+# The sentinel column we check to verify the response is actually an ECCC station CSV.
+_REQUIRED_COLUMN_PREFIX: str = "Date/Time"
+
+# All 8 physical variable names (defines column order in output).
+_PHYS_VARS: tuple[str, ...] = (
+    "temp_c",
+    "dewpoint_c",
+    "surface_pressure_hpa",
+    "precip_mm",
+    "cloud_cover_fraction",
+    "solar_radiation_wm2",
+    "wind_speed_ms",
+    "wind_dir_deg",
+)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _try_float(value: object) -> float | None:
+    """Parse *value* to float; return None if blank / non-numeric."""
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _magnus_tetens(t: float, rh: float) -> float:
+    """Derive dewpoint (°C) from temperature *t* (°C) and relative humidity *rh* (%)."""
+    gamma = math.log(rh / 100.0) + _MT_A * t / (_MT_B + t)
+    return _MT_B * gamma / (_MT_A - gamma)
+
+
+def _find_col(columns: pd.Index, prefix: str) -> str | None:  # type: ignore[type-arg]
+    """Return the first column name whose text starts with *prefix*, or None."""
+    for col in columns:
+        if str(col).startswith(prefix):
+            return str(col)
+    return None
+
+
+def _get_cell(series: pd.Series, col: str | None) -> float | None:  # type: ignore[type-arg]
+    """Extract a float from *series[col]*; return None if col is None or value is non-numeric."""
+    if col is None:
+        return None
+    return _try_float(series.get(col, ""))
+
+
+# ---------------------------------------------------------------------------
+# Seam — network I/O lives here exclusively
+# ---------------------------------------------------------------------------
+
+
+def _fetch_eccc_csv(station_id: str, year: int, month: int) -> str:
+    """Fetch one month of ECCC bulk hourly CSV for *station_id*.
+
+    Returns the raw CSV text (UTF-8 BOM, ECCC format).
+    Raises SourceUnavailable on any network / HTTP error (via http_get).
+    """
+    params: dict[str, str | int] = {
+        "format": "csv",
+        "stationID": station_id,
+        "Year": year,
+        "Month": month,
+        "Day": 1,
+        "timeframe": 1,
+        "submit": "Download Data",
+    }
+    return http_get(_ECCC_URL, params=params)
+
+
+# ---------------------------------------------------------------------------
+# Core — pure CSV → DataFrame parsing (no network)
+# ---------------------------------------------------------------------------
+
+
+def _parse_eccc_csv(csv_text: str, station_id: str) -> pd.DataFrame:
+    """Parse raw ECCC bulk hourly CSV text into an OBSERVATION_FRAME-compatible DataFrame.
+
+    Args:
+        csv_text:   Raw CSV returned by the ECCC bulk endpoint (UTF-8 BOM encoded).
+        station_id: The MSC station identifier to populate the ``station_id`` column.
+
+    Returns:
+        DataFrame conforming to OBSERVATION_FRAME (not yet Pandera-validated; caller
+        decides when to validate).
+
+    Raises:
+        StationNotFound: If *csv_text* is not a recognisable ECCC station CSV (i.e.
+            the required ``Date/Time (LST)`` column is absent).
+    """
+    # ------------------------------------------------------------------
+    # 1. Parse raw CSV; handle UTF-8 BOM via encoding_errors-safe read.
+    # ------------------------------------------------------------------
+    try:
+        raw = pd.read_csv(  # type: ignore[reportUnknownMemberType]
+            io.StringIO(csv_text),
+            dtype=str,
+            encoding="utf-8-sig",
+            keep_default_na=False,
+            on_bad_lines="skip",
+        )
+    except Exception as exc:
+        raise StationNotFound(f"Cannot parse ECCC CSV for station {station_id!r}: {exc}") from exc
+
+    # ------------------------------------------------------------------
+    # 2. Validate the response looks like an ECCC station CSV.
+    # ------------------------------------------------------------------
+    dt_col = _find_col(raw.columns, _REQUIRED_COLUMN_PREFIX)
+    if dt_col is None:
+        raise StationNotFound(
+            f"Response for station {station_id!r} is not an ECCC bulk hourly CSV "
+            f"(missing '{_REQUIRED_COLUMN_PREFIX}...' column)."
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Locate source columns by prefix (immune to degree-sign encoding).
+    # ------------------------------------------------------------------
+    temp_col = _find_col(raw.columns, "Temp (")
+    dp_col = _find_col(raw.columns, "Dew Point Temp (")
+    rh_col = _find_col(raw.columns, "Rel Hum (")
+    press_col = _find_col(raw.columns, "Stn Press (")
+    precip_col = _find_col(raw.columns, "Precip. Amount (")
+    wdir_col = _find_col(raw.columns, "Wind Dir (")
+    wspd_col = _find_col(raw.columns, "Wind Spd (")
+
+    # ------------------------------------------------------------------
+    # 4. Iterate rows: parse timestamp, convert LST → UTC, build output.
+    # ------------------------------------------------------------------
+    rows: list[dict[str, object]] = []
+
+    for _, series in raw.iterrows():
+        dt_str = str(series.get(dt_col, "")).strip()
+        if not dt_str:
+            continue
+        try:
+            lst = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue
+
+        utc_ts = pd.Timestamp(lst + _LST_UTC_OFFSET, tz="UTC")
+
+        # ------------------------------------------------------------------
+        # 5. Parse each physical variable; apply unit conversions.
+        # ------------------------------------------------------------------
+        temp_v = _get_cell(series, temp_col)
+        rh_v = _get_cell(series, rh_col)
+
+        # Dewpoint: use cell value if present; else derive from T+RH; else absent.
+        dp_v_raw = _get_cell(series, dp_col)
+        if dp_v_raw is not None:
+            dp_v: float | None = dp_v_raw
+        elif temp_v is not None and rh_v is not None and rh_v > 0.0:
+            dp_v = _magnus_tetens(temp_v, rh_v)
+        else:
+            dp_v = None
+
+        press_raw = _get_cell(series, press_col)
+        press_v = press_raw * 10.0 if press_raw is not None else None  # kPa → hPa
+
+        precip_v = _get_cell(series, precip_col)
+
+        wdir_raw = _get_cell(series, wdir_col)
+        wdir_v = wdir_raw * 10.0 if wdir_raw is not None else None  # tens-of-deg → deg
+
+        wspd_raw = _get_cell(series, wspd_col)
+        wspd_v = wspd_raw / 3.6 if wspd_raw is not None else None  # km/h → m/s
+
+        # cloud and solar are not in the ECCC bulk CSV → always absent.
+        cloud_v: float | None = None
+        solar_v: float | None = None
+
+        var_values: dict[str, float | None] = {
+            "temp_c": temp_v,
+            "dewpoint_c": dp_v,
+            "surface_pressure_hpa": press_v,
+            "precip_mm": precip_v,
+            "cloud_cover_fraction": cloud_v,
+            "solar_radiation_wm2": solar_v,
+            "wind_speed_ms": wspd_v,
+            "wind_dir_deg": wdir_v,
+        }
+
+        # ------------------------------------------------------------------
+        # 6. Drop rows where ALL 8 physical variables are absent
+        #    (not-yet-reported trailing rows in live current-month CSV).
+        # ------------------------------------------------------------------
+        if all(v is None for v in var_values.values()):
+            continue
+
+        # ------------------------------------------------------------------
+        # 7. Build the output row with _present masks.
+        # ------------------------------------------------------------------
+        out: dict[str, object] = {
+            "station_id": station_id,
+            "timestamp": utc_ts,
+        }
+        for var, val in var_values.items():
+            out[var] = val if val is not None else float("nan")
+            out[f"{var}_present"] = val is not None
+
+        rows.append(out)
+
+    if not rows:
+        raise StationNotFound(
+            f"No valid observation rows found in ECCC response for station {station_id!r}."
+        )
+
+    df: pd.DataFrame = pd.DataFrame(rows)  # type: ignore[reportUnknownMemberType]
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Connector implementation
+# ---------------------------------------------------------------------------
 
 
 @register_source("envcanada")
 class EnvCanadaSource(ObservationSource):
+    """Environment Canada ECCC bulk hourly CSV observation connector.
+
+    Fetches monthly bulk CSVs from the ECCC climate data portal and normalises them
+    to ``OBSERVATION_FRAME``.  Optionally accepts an injectable ``fetcher`` callable
+    for hermetic unit testing (see module docstring).
+    """
+
+    def __init__(
+        self,
+        fetcher: Callable[[str, int, int], str] | None = None,
+    ) -> None:
+        # Default to the real seam; allows zero-arg instantiation by the registry.
+        self._fetcher: Callable[[str, int, int], str] = (
+            fetcher if fetcher is not None else _fetch_eccc_csv
+        )
+
     @property
     def historical_coverage(self) -> HistoricalCoverage:
         return "deep"
 
     def fetch_historical(self, station_id: str, start: datetime, end: datetime) -> pd.DataFrame:
-        raise NotImplementedError
+        """Return observations for *station_id* in [*start*, *end*] (inclusive).
+
+        Args:
+            station_id: MSC station identifier (e.g. ``"49268"``).
+            start:      Window start (UTC-aware; if naive, treated as UTC).
+            end:        Window end   (UTC-aware; if naive, treated as UTC).
+
+        Returns:
+            OBSERVATION_FRAME-conformant DataFrame, sorted ascending by timestamp.
+
+        Raises:
+            SourceUnavailable: If any underlying HTTP request fails.
+            StationNotFound:   If the response is not a recognisable ECCC station CSV.
+        """
+        start_utc = _ensure_utc(start)
+        end_utc = _ensure_utc(end)
+
+        months = _month_range(start_utc, end_utc)
+        frames: list[pd.DataFrame] = []
+        for year, month in months:
+            csv_text = self._fetcher(station_id, year, month)
+            df = _parse_eccc_csv(csv_text, station_id)
+            frames.append(df)
+
+        combined = pd.concat(frames, ignore_index=True)  # type: ignore[reportUnknownMemberType]
+        # Filter to the requested window (inclusive).
+        mask = (combined["timestamp"] >= pd.Timestamp(start_utc)) & (
+            combined["timestamp"] <= pd.Timestamp(end_utc)
+        )
+        result: pd.DataFrame = (
+            combined.loc[mask].sort_values("timestamp").reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
+        )
+
+        if len(result) == 0:
+            raise StationNotFound(
+                f"No rows in [{start_utc}, {end_utc}] for station {station_id!r}."
+            )
+
+        return result
 
     def fetch_live(self, station_id: str, since: datetime) -> pd.DataFrame:
-        raise NotImplementedError
+        """Return observations for *station_id* from *since* to now (current month).
+
+        Args:
+            station_id: MSC station identifier.
+            since:      Lower bound (UTC-aware; if naive, treated as UTC).
+
+        Returns:
+            OBSERVATION_FRAME-conformant DataFrame, sorted ascending by timestamp.
+
+        Raises:
+            SourceUnavailable: If the underlying HTTP request fails.
+            StationNotFound:   If the response is not a recognisable ECCC station CSV.
+        """
+        since_utc = _ensure_utc(since)
+        now = datetime.now(tz=UTC)
+        year, month = now.year, now.month
+
+        csv_text = self._fetcher(station_id, year, month)
+        df = _parse_eccc_csv(csv_text, station_id)
+
+        mask = df["timestamp"] >= pd.Timestamp(since_utc)
+        result: pd.DataFrame = (
+            df.loc[mask].sort_values("timestamp").reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
+        )
+
+        if len(result) == 0:
+            raise StationNotFound(f"No rows since {since_utc} for station {station_id!r}.")
+
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Return *dt* as a UTC-aware datetime; naive datetimes are assumed UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _month_range(start: datetime, end: datetime) -> list[tuple[int, int]]:
+    """Return list of (year, month) tuples spanning *start* to *end* (inclusive)."""
+    months: list[tuple[int, int]] = []
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        months.append((y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return months
