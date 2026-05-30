@@ -54,18 +54,17 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **Deployment** — one fully-specified instance of the system for one place. Defined by a
   single validated config file (`config/deployments/<id>.yml`). Identified by a
   **`deployment_id`** (e.g. `lethbridge`). Every artifact, model, and output is namespaced
-  by `deployment_id`. The system is **multi-deployment by design**. v1 ships **two**
-  deployments: `lethbridge` (seeded, trainable now) and `lethbridge_henderson` (cold-start,
-  accumulating) — see *training strategy*.
-- **Training strategy** — a per-deployment mode:
-  - **`seeded`** — sources have *deep* historical coverage; training uses the CaSPAr
-    *historical seed* + the logger; trainable from day one.
-  - **`cold_start`** — the target source is live-only (e.g. CWOP); there is **no historical
-    seed**, the *logger* is the sole label source, and the deployment publishes no model
-    until a configured minimum of logged rows accumulates.
-- **Cold start** — the condition of a `cold_start` deployment before enough forward-logged
-  labels exist to train. The inference run still logs; the training pipeline reports
-  "insufficient data" rather than publishing an untrained model.
+  by `deployment_id`. The system is **multi-deployment by design**. v1 ships **one**
+  deployment: `lethbridge` (`seeded`), targeting ACIS Demo Farm IMCIN (#9835).
+- **Training strategy** — a per-deployment mode. v1 uses only **`seeded`**: all observation
+  sources have *deep* historical coverage and training uses the CaSPAr *historical seed* +
+  the logger (trainable from day one). A **`cold_start`** mode (live-only target, logger as
+  the sole label source, not trainable until logged data accumulates) is *designed but
+  deferred* — see *cold start*.
+- **Cold start** *(deferred — not in v1)* — the strategy for a target with no free deep
+  history (e.g. a CWOP PWS): labels accumulate forward via the logger. Documented in
+  ADR-0008 as the path for predicting *at Henderson Lake* once a station becomes reachable
+  there; not implemented in v1 because no free live station exists at Henderson today.
 - **Target** / **target station** — the single station a deployment predicts *for*. Its
   observations are the training **labels**, and (in v1) also an input feature.
 - **Neighbor** / **neighbor station** — a nearby station whose recent observations are
@@ -91,24 +90,19 @@ weather agency**. It corrects an existing official forecast for local bias.
   present or imputed. Lets a down feed degrade accuracy gracefully instead of crashing.
 - **Dual-feed source** — an observation source that provides **both** an hourly
   historical feed (for training) **and** an hourly live feed (for inference), for the same
-  physical measurement. Daily-only sources such as CoCoRaHS are ineligible. Eligibility is
-  **strategy-aware** (see *training strategy*): a `seeded` deployment requires every source
-  to have **deep** historical coverage; a `cold_start` deployment may use a live-only target
-  source (ADR-0008).
+  physical measurement. **Eligibility requires every observation source to have `deep`
+  historical coverage** (see *historical coverage*); daily-only sources (CoCoRaHS) and
+  live-only sources (CWOP) are ineligible (ADR-0008).
 - **Historical coverage** — a declared, validated capability of each `ObservationSource`:
-  `deep` (multi-year, e.g. Environment Canada, ACIS), `shallow`, or `none` (live-only, e.g.
-  CWOP). Depth is explicit and machine-checked, not assumed.
+  `deep` (multi-year, e.g. Environment Canada, ACIS), `shallow`, or `none` (live-only).
+  Depth is explicit and machine-checked, not assumed; only `deep` sources are eligible.
 - **Connector** — the abstraction over a data source. An `NWPSource` or an
   `ObservationSource`; observation connectors implement both historical and live fetch (the
-  dual-feed contract) and declare their *historical coverage*. A live-only source
-  implements `fetch_historical` as best-effort and declares coverage `none`/`shallow`.
-- **Available sources** — the free, no-device sources this project actually uses:
-  **Environment Canada** (SWOB live + historical CSV, deep), **ACIS** (current + historical,
-  deep), and **CWOP** (live only, no free deep history). Consumer-PWS network APIs
-  (Weather Underground, Tempest, Ambient) are device-gated and **not used** (ADR-0008).
-- **CWOP** (Citizen Weather Observer Program) — a free, no-device network of volunteer PWS
-  observations. Used as a *live-only* source for `cold_start` deployments (it has no
-  reliable free multi-year history).
+  dual-feed contract) and declare their *historical coverage*.
+- **Available sources** — the free, no-device sources this project uses: **Environment
+  Canada** (SWOB live + historical CSV, deep) and **ACIS** (current + historical, deep).
+  Consumer-PWS network APIs (Weather Underground, Tempest, Ambient) are device-gated and
+  **not used**; CWOP is live-only and therefore ineligible for the (seeded) v1 (ADR-0008).
 - **Precip-occurrence label** — the binary training label for PoP: `1` if observed
   precipitation in the hour meets/exceeds the configured threshold, else `0`.
 

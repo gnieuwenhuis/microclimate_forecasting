@@ -80,8 +80,7 @@ L0  contracts        (pure Pydantic/Pandera types; no internal imports)
 │   └── superpowers/specs/             # this spec
 ├── config/
 │   ├── deployments/
-│   │   ├── lethbridge.yml             # v1 seeded deployment (ACIS target, trainable now)
-│   │   └── lethbridge_henderson.yml   # v1 cold_start deployment (CWOP target, accumulating)
+│   │   └── lethbridge.yml             # the single v1 deployment (seeded; ACIS Demo Farm target)
 │   └── README.md                      # how to add a deployment
 ├── src/microclimate/
 │   ├── __init__.py
@@ -105,8 +104,7 @@ L0  contracts        (pure Pydantic/Pandera types; no internal imports)
 │   │       ├── hrdps_geomet.py        # NWPSource (live)
 │   │       ├── hrdps_caspar.py        # NWPSource (historical seed)
 │   │       ├── envcanada.py           # ObservationSource (deep history + live)
-│   │       ├── acis.py                # ObservationSource (deep history + live)
-│   │       └── cwop.py                # ObservationSource (live-only; coverage="none")
+│   │       └── acis.py                # ObservationSource (deep history + live)
 │   ├── features/                      # L3
 │   │   ├── __init__.py
 │   │   └── snapshot_builder.py        # build_snapshot(...) — the SOLE feature path
@@ -195,19 +193,16 @@ Pure data definitions. No internal imports; depends only on stdlib, Pydantic, Pa
 - **`schema.py`**
   - Purpose: validated deployment definition (ADR-0006).
   - Interface: Pydantic `DeploymentConfig` with `deployment_id: str`,
-    `training_strategy: Literal["seeded","cold_start"]` (ADR-0008),
     `target: StationRef`, `neighbors: list[StationRef]`, `enabled_sources: list[str]`,
     `nwp: NwpConfig` (grid sampling spec, must match across CaSPAr/GeoMet — ADR-0007),
     `horizon_hours: int = 48`, `lag_hours: int`, `feature_groups: FeatureGroupSwitches`,
     `label: LabelConfig` (`precip_occurrence_threshold_mm: float`),
-    `training: TrainingConfig` (`seed: SeedConfig | None`, `min_training_rows: int | None`,
-    `holdout_months: int`), `output: OutputConfig`.
+    `training: TrainingConfig` (`seed: SeedConfig`, `holdout_months: int`),
+    `output: OutputConfig`.
     `StationRef = {station_id, connector_key, lat, lon, elevation_m}`. `StationRef`,
     `NwpConfig`, `FeatureGroupSwitches`, `LabelConfig`, `TrainingConfig`, `SeedConfig`, and
     `OutputConfig` are **local Pydantic models defined in this module** (not L0 contracts —
-    they exist only to structure `DeploymentConfig`). A model validator enforces the
-    strategy invariant: `seeded` requires `training.seed` present; `cold_start` requires
-    `training.seed is None` and `min_training_rows` set.
+    they exist only to structure `DeploymentConfig`).
   - Enforces: a malformed config raises at load (shape, types, ranges). **Source
     *eligibility* is deliberately not checked here** — that would require importing the
     connectors layer (L2) from config (L1), an upward import the layer rule forbids.
@@ -232,9 +227,9 @@ Pure data definitions. No internal imports; depends only on stdlib, Pydantic, Pa
     - `ObservationSource`: **both** `fetch_historical(station_id, start, end) ->
       DataFrame[OBSERVATION_FRAME]` **and** `fetch_live(station_id, since) ->
       DataFrame[OBSERVATION_FRAME]` (both abstract), plus a declared
-      `historical_coverage: Literal["deep","shallow","none"]` capability (ADR-0008). A
-      live-only source (CWOP) implements `fetch_historical` as best-effort and declares
-      `"none"`.
+      `historical_coverage: Literal["deep","shallow","none"]` capability (ADR-0008). v1
+      eligibility requires `deep`; `shallow`/`none` sources exist only for a future
+      cold-start path.
   - Enforces: a half-implemented observation source (one feed missing) cannot be
     instantiated; historical depth is a declared, checkable capability, not an assumption.
 - **`registry.py`**
@@ -243,14 +238,11 @@ Pure data definitions. No internal imports; depends only on stdlib, Pydantic, Pa
   - Interface: `@register_source(key)` decorator; `get_source(key) -> Source`;
     `is_registered(key) -> bool`; `registered_keys() -> set[str]`;
     **`validate_config_sources(config: DeploymentConfig) -> None`** — raises if the config
-    names an unregistered source, or if it violates the **strategy-aware** rule (ADR-0008):
-    a `seeded` deployment requires every named `ObservationSource` to declare
-    `historical_coverage == "deep"`; a `cold_start` deployment permits the **target**
-    source to be `"shallow"`/`"none"` (e.g. CWOP) while neighbors must still be `"deep"`.
+    names an unregistered source, or if any named `ObservationSource` declares
+    `historical_coverage != "deep"` (ADR-0008: v1 requires deep history for every source).
   - Dependencies: `contracts`, `config` (importing config from L2 is *downward* — allowed).
-  - Enforces: config can only name registered sources whose historical coverage matches the
-    deployment's training strategy — checked here (called by pipelines at startup) and in a
-    CI config test, never by the config layer itself.
+  - Enforces: config can only name registered, deep-history sources — checked here (called
+    by pipelines at startup) and in a CI config test, never by the config layer itself.
 - **`sources/*`**: one stub class per source, decorated with `@register_source`, methods
   raising `NotImplementedError`. Present so the registry is populated and the contract-test
   harness has subjects.
@@ -306,9 +298,7 @@ Pure data definitions. No internal imports; depends only on stdlib, Pydantic, Pa
 - **`training.py`**
   - Purpose: load config → `validate_config_sources(config)` → read training store →
     train temp & pop → evaluate → run publish gate → update registry / upload champions on
-    promotion. For a `cold_start` deployment with fewer than `training.min_training_rows`
-    labeled rows, it **reports "insufficient data" and exits without publishing** (never
-    ships an untrained model) — ADR-0008.
+    promotion.
   - Interface: `run_training(deployment_id: str) -> None`; CLI-invokable.
 
 ### Dashboard (`dashboard/`)
@@ -385,12 +375,11 @@ The skeleton is complete when **all** hold:
 5. `pytest` passes, including: contract-object validation tests, the architecture/layering
    test, the connector contract-test harness running (and passing on the trivial structural
    assertions) against every registered source stub, and the deployments-validity test.
-6. **Both** `config/deployments/lethbridge.yml` (`seeded`) and `lethbridge_henderson.yml`
-   (`cold_start`) load via `load_deployment` (schema-valid) **and** pass
-   `validate_config_sources` under their respective strategies, asserted by
-   `tests/config/test_deployments_valid.py`. (Exact ACIS station codes and the Henderson
-   CWOP station id are the deferred config-authoring values, marked `# CONFIRM` in the YAML;
-   targets are genuine microclimate stations, not the airport — ADR-0006/0008.)
+6. `config/deployments/lethbridge.yml` loads via `load_deployment` (schema-valid) **and**
+   passes `validate_config_sources` (all sources registered + `deep`), asserted by
+   `tests/config/test_deployments_valid.py`. The target is ACIS Demo Farm IMCIN (#9835), a
+   genuine microclimate station, not the airport (ADR-0006/0008). A few neighbor coordinates
+   and elevations remain marked `# CONFIRM` in the YAML (gated ACIS metadata API).
 7. Every module file listed in the layout exists with its declared public interface; bodies
    are `...` / `raise NotImplementedError`. No business logic is present.
 8. The three workflow files exist with correct triggers/matrix wiring and invoke the stub

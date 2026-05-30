@@ -39,45 +39,55 @@ historical seed.
    - **`seeded`** — every observation source must have deep historical coverage
      (dual-feed). Training uses the CaSPAr historical seed + the logger. Trainable from day
      one.
-   - **`cold_start`** — the target source may be **live-only** (e.g. CWOP). There is no
-     historical seed; the logger is the sole label source. **Not trainable until a
-     configured minimum of logged rows accumulates**; until then the deployment publishes no
-     model (the pipeline reports "insufficient data", it does not fail).
+   - **`cold_start`** *(designed but not implemented in v1 — see finding below)* — a target
+     source may be live-only; there is no historical seed and the logger is the sole label
+     source, so the deployment is not trainable until enough logged rows accumulate.
 3. **Per-source historical coverage is explicit and machine-checked.** Each
-   `ObservationSource` declares a `historical_coverage` capability (`none` / `shallow` /
-   `deep`). Source-eligibility validation is **strategy-aware**: `seeded` requires all
-   sources `deep`; `cold_start` permits a `none`/`shallow` target source.
-4. **v1 ships two deployments (ADR-0006):**
+   `ObservationSource` declares a `historical_coverage` capability (`deep` / `shallow` /
+   `none`). **Eligibility requires every observation source to be `deep`** — the dual-feed /
+   deep-history rule, now mechanically enforced (a `none`/`shallow` source like CWOP is
+   ineligible).
+4. **v1 ships one deployment (ADR-0006):**
    - **`lethbridge`** — `seeded`; target = the closest free *official* deep-history station
-     to Henderson Lake (an ACIS city-edge station, e.g. Demo Farm AGDM); neighbors = free
-     ACIS county stations + YQL (ECCC). Trainable immediately; proves the pipeline.
-   - **`lethbridge_henderson`** — `cold_start`; target = a Henderson-area CWOP PWS read
-     live; labels accumulate forward. Keeps the true microclimate goal alive on the only
-     viable free basis.
+     to Henderson Lake: **ACIS Lethbridge Demo Farm IMCIN (#9835)**, ~6 km E; neighbors =
+     free ACIS county stations (Picture Butte #710547, Iron Springs #9883, Blood Tribe
+     #9747) + YQL airport (ECCC Climate ID 3033875). Trainable immediately.
+
+### Finding: Henderson Lake is currently unreachable on free data
+
+A station-by-station check (2026-05-30) of the live CWOP/APRS feed found **no active,
+free PWS within ~6 km of Henderson Lake**. Every station in that radius is a government
+ECCC/ACIS station *not* pushing to the live CWOP feed, or inactive. The nearest actual
+personal stations (WU `ILETHB87`, `IALBERTA72`, `ILETHB19`) are WU-only (no CWOP
+dual-push), currently offline, and behind WU's device-gated API. There is therefore no
+free live *or* historical feed at Henderson today.
+
+Consequently the planned `lethbridge_henderson` cold-start deployment **was dropped from
+v1** — it had no station to point at. The `cold_start` strategy and a CWOP connector remain
+documented here as the **deferred path**, to be reintroduced (with a new ADR) only when a
+trigger occurs: a CWOP PWS appears near Henderson, or the owner installs hardware there
+(which unlocks that network's API and makes the owner the ground truth — still a cold start,
+but a real, controlled Henderson station).
 
 ## Consequences
 
-- **ADR-0002 is amended:** observation inputs come from ECCC/ACIS (and CWOP-live for
-  cold-start deployments), not consumer-PWS APIs. The live-neighbor-obs intent of ADR-0002
-  survives — ACIS county stations serve as the neighbors.
-- The `ObservationSource` ABC keeps both `fetch_historical` and `fetch_live` (the dual-feed
-  structural contract is unchanged); a live-only source like CWOP implements
-  `fetch_historical` as best-effort and declares `historical_coverage = "none"` (or
-  `"shallow"`). Depth is now a declared, validated capability rather than an assumption.
-- The source-eligibility validator (`connectors/registry.validate_config_sources`) becomes
-  strategy-aware; the connector contract-test harness gains a case asserting each source's
-  declared coverage matches what its historical fetch returns over a probe window.
-- The training pipeline and publish gate must handle a `cold_start` deployment with
-  insufficient data gracefully (skip, report), never publishing an untrained model.
-- If the owner later installs hardware at Henderson Lake (ADR-0008 supersedes nothing here —
-  it stays a config swap), the `lethbridge_henderson` target connector changes from CWOP to
-  that device's source; accumulated logged data carries over.
+- **ADR-0002 is amended:** observation inputs come from ECCC/ACIS, not consumer-PWS APIs.
+  The live-neighbor-obs intent of ADR-0002 survives — ACIS county stations serve as the
+  neighbors.
+- The `ObservationSource` ABC keeps both `fetch_historical` and `fetch_live` (dual-feed
+  contract unchanged) and declares `historical_coverage`; the eligibility validator
+  (`connectors/registry.validate_config_sources`) rejects any non-`deep` source, and the
+  connector contract-test harness asserts a source's declared coverage matches what its
+  historical fetch returns over a probe window.
+- v1 implements only the `seeded` path; the `cold_start` branch (logger-only labels,
+  insufficient-data handling) is **not built** until Henderson (or another live-only target)
+  becomes reachable.
 
 ## Alternatives considered
 
-- **All-free official sources, single deployment, re-target near Henderson** — rejected as
-  the *sole* path: it abandons the Henderson goal. (It is exactly the `lethbridge` half of
-  the hybrid.)
-- **Own hardware at Henderson Lake** — deferred: not free, and still a cold start; can be
-  adopted later as a connector swap.
+- **Park `lethbridge_henderson` as a disabled config** — rejected in favour of dropping it:
+  it had no real station, so a disabled placeholder would carry unused cold-start machinery
+  for no v1 benefit. The intent is preserved in this ADR instead.
+- **Own hardware at Henderson Lake** — deferred: not free, still a cold start; adoptable
+  later as a new deployment + ADR.
 - **Pay for Synoptic/TempestONE** — rejected: violates the free-to-deploy constraint.

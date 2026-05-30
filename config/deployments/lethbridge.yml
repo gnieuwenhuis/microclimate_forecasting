@@ -10,42 +10,42 @@
 # spec. Coordinates given are best-known.
 
 deployment_id: lethbridge
-training_strategy: seeded          # all sources must have deep historical coverage
+# Seeded deployment: every observation source has deep history; training uses the CaSPAr
+# seed + the logger. (v1 has only this strategy; cold-start is deferred — ADR-0008.)
 
 target:
-  # Closest free, deep-history official station to Henderson Lake we could confirm.
-  # Demo Farm AGDM sits ~6 km E of Henderson Lake (49.687, -112.826). An ACIS ag-station
-  # is a better skill demo than YQL (HRDPS does not already nail it). Agtech AGCM is the
-  # alternative if it proves closer/cleaner in the viewer.
-  station_id: lethbridge-demo-farm-agdm   # CONFIRM exact ACIS station code in viewer
+  # Closest free, deep-history official station to Henderson Lake (~6 km E, at 49.687,
+  # -112.826). An ACIS ag-station is a better skill demo than YQL (HRDPS does not already
+  # nail it). ACIS station #9835; identifier confirmed from the ACIS station dropdown.
+  station_id: "9835"                       # ACIS: Lethbridge Demo Farm IMCIN
   connector_key: acis
-  lat: 49.689
-  lon: -112.745
+  lat: 49.68872
+  lon: -112.74494
   elevation_m: 903
 
 neighbors:
   # Free sources only. YQL is the regional baseline; ACIS county stations are the
   # storm-advection vectors called out in the PoP literature (north/NE/SW of the city).
-  - station_id: CYQL                       # Lethbridge Airport (ECCC)
+  - station_id: "3033875"                  # ECCC Lethbridge Airport (TC: YQL, MSC stnID 2263)
     connector_key: envcanada
-    lat: 49.630
-    lon: -112.800
+    lat: 49.6303
+    lon: -112.7989
     elevation_m: 929
-  - station_id: picture-butte-west-agdm    # N — cold fronts from the north
+  - station_id: "710547"                   # ACIS: Picture Butte LITE (N). NB: precip gauge unconfirmed
     connector_key: acis
-    lat: 49.881                            # CONFIRM coords/code in ACIS viewer
-    lon: -112.789
-    elevation_m: 900
-  - station_id: iron-springs-agdm          # NE
+    lat: 49.8867                           # CONFIRM exact station coords + elevation (gated ACIS API)
+    lon: -112.78
+    elevation_m: null                      # CONFIRM
+  - station_id: "9883"                     # ACIS: Iron Springs IMCIN (NE)
     connector_key: acis
-    lat: 49.901                            # CONFIRM coords/code in ACIS viewer
-    lon: -112.704
-    elevation_m: 910
-  - station_id: blood-tribe-agdm           # SW — convective storms off the foothills
+    lat: 49.93                             # CONFIRM 2nd-decimal coords + elevation (gated ACIS API)
+    lon: -112.687
+    elevation_m: null                      # CONFIRM
+  - station_id: "9747"                     # ACIS: Blood Tribe Ag Project IMCIN (SW — foothills convection)
     connector_key: acis
-    lat: 49.563                            # CONFIRM coords/code in ACIS viewer
-    lon: -112.951
-    elevation_m: 950
+    lat: 49.5333
+    lon: -113.05
+    elevation_m: null                      # CONFIRM elevation (gated ACIS API)
 
 enabled_sources: [hrdps_geomet, hrdps_caspar, envcanada, acis]
 
