@@ -1,0 +1,76 @@
+# Deployment: lethbridge  (seeded — trainable from day one)
+#
+# Downscales HRDPS to a free, deep-history official station near Henderson Lake.
+# This is the pipeline-proving deployment: ECCC + ACIS sources, CaSPAr historical seed,
+# champion/challenger publish gate. See ADR-0001, ADR-0006, ADR-0008.
+#
+# Values marked `# CONFIRM` need a one-time lookup in the ACIS data viewer
+# (https://acis.alberta.ca/weather-data-viewer.jsp) — the exact ACIS station identifiers
+# and neighbor coordinates are the deferred config-authoring values from the scaffolding
+# spec. Coordinates given are best-known.
+
+deployment_id: lethbridge
+training_strategy: seeded          # all sources must have deep historical coverage
+
+target:
+  # Closest free, deep-history official station to Henderson Lake we could confirm.
+  # Demo Farm AGDM sits ~6 km E of Henderson Lake (49.687, -112.826). An ACIS ag-station
+  # is a better skill demo than YQL (HRDPS does not already nail it). Agtech AGCM is the
+  # alternative if it proves closer/cleaner in the viewer.
+  station_id: lethbridge-demo-farm-agdm   # CONFIRM exact ACIS station code in viewer
+  connector_key: acis
+  lat: 49.689
+  lon: -112.745
+  elevation_m: 903
+
+neighbors:
+  # Free sources only. YQL is the regional baseline; ACIS county stations are the
+  # storm-advection vectors called out in the PoP literature (north/NE/SW of the city).
+  - station_id: CYQL                       # Lethbridge Airport (ECCC)
+    connector_key: envcanada
+    lat: 49.630
+    lon: -112.800
+    elevation_m: 929
+  - station_id: picture-butte-west-agdm    # N — cold fronts from the north
+    connector_key: acis
+    lat: 49.881                            # CONFIRM coords/code in ACIS viewer
+    lon: -112.789
+    elevation_m: 900
+  - station_id: iron-springs-agdm          # NE
+    connector_key: acis
+    lat: 49.901                            # CONFIRM coords/code in ACIS viewer
+    lon: -112.704
+    elevation_m: 910
+  - station_id: blood-tribe-agdm           # SW — convective storms off the foothills
+    connector_key: acis
+    lat: 49.563                            # CONFIRM coords/code in ACIS viewer
+    lon: -112.951
+    elevation_m: 950
+
+enabled_sources: [hrdps_geomet, hrdps_caspar, envcanada, acis]
+
+nwp:
+  product: hrdps
+  live_connector: hrdps_geomet             # GeoMet/Datamart — inference
+  historical_connector: hrdps_caspar       # CaSPAr archive — training seed
+  sampling: nearest_grid_cell              # sample HRDPS at the target lat/lon
+  # The CaSPAr and GeoMet variable/grid spec MUST match (ADR-0007 / CONTEXT "one HRDPS spec").
+
+horizon_hours: 48
+lag_hours: 6                               # recent-observation window for obs features
+
+feature_groups:
+  nwp: true
+  observations: true                       # target + neighbor obs as inputs (ADR-0002)
+
+label:
+  precip_occurrence_threshold_mm: 0.2      # hour counts as "precip" at/above this (tipping-bucket trace)
+
+training:
+  seed:
+    source: caspar
+    start: "2017-05-22"                    # CaSPAr HRDPS archive start
+  holdout_months: 12                       # temporal holdout = most recent 12 months
+
+output:
+  forecast_json: "forecasts/lethbridge.json"   # published to gh-pages

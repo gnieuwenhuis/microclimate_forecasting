@@ -1,0 +1,44 @@
+# 7. Self-accumulating training store: CaSPAr seed + inference logger
+
+- **Status:** Accepted
+- **Date:** 2026-05-30
+
+## Context
+
+Downscaling (ADR-0001) needs historical *(forecast, observed-outcome)* pairs to train.
+Historical HRDPS forecasts come from **CaSPAr**, but CaSPAr is a **queued bulk-request
+research archive, not an API** — a monthly retrain cannot freshly pull from it on a cron.
+Meanwhile, the inference pipeline (ADR-0003) already fetches a full feature snapshot every
+hour.
+
+## Decision
+
+Make the inference pipeline double as a **logger**, and use CaSPAr only as a one-time seed:
+
+- **CaSPAr = one-time historical seed** — backfill HRDPS + obs from 2017-05-22 to the
+  deploy date, once.
+- **Logger = ongoing source** — every hourly inference run persists the feature snapshot it
+  built. A later labeling step joins realized observations once each `valid_time` passes,
+  closing the loop into fully labeled training rows.
+
+This produces a **training store** (partitioned Parquet, per deployment) that grows
+automatically. The HRDPS specification from CaSPAr and from the live channels must be
+identical (same variables/grid), or seed and logged data diverge.
+
+## Consequences
+
+- Ongoing training is fully decoupled from CaSPAr's request queue.
+- A **fourth artifact home** is required: a `training-data` branch holding the Parquet
+  store.
+- A logged row isn't trainable until its `valid_time` + observation latency passes; the
+  first ~48 h after a fresh deploy produce no new labeled data, so the CaSPAr seed carries
+  the deployment until logged data accumulates.
+- The training store carries a `schema_version`; a feature-contract change must account for
+  previously logged data.
+
+## Alternatives considered
+
+- **Re-request CaSPAr each retrain** — rejected: CaSPAr's queued bulk model makes this
+  impractical on a schedule.
+- **Reanalysis (e.g. ERA5) as the training input** — rejected: reanalysis is a hindcast,
+  not a forecast, introducing train/serve skew against live HRDPS.

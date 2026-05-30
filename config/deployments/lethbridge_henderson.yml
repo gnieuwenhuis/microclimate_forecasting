@@ -1,0 +1,63 @@
+# Deployment: lethbridge_henderson  (cold_start — accumulates, not trainable yet)
+#
+# The true microclimate goal: predict at Henderson Lake itself. No free deep-history
+# station exists there (consumer-PWS APIs are device-gated — ADR-0008), so the target is a
+# Henderson-area CWOP station read live for free, and labels accumulate FORWARD via the
+# ADR-0007 logger. This deployment publishes no model until `min_training_rows` is reached;
+# until then the inference run only logs. See ADR-0006, ADR-0007, ADR-0008.
+#
+# Values marked `# CONFIRM` need a one-time lookup. The target CWOP station should be the
+# nearest *active* PWS to Henderson Lake on the live APRS/CWOP map (https://aprs.fi/weather/
+# or https://weather.gladstonefamily.net/) — also check whether the WU candidates
+# ILETHB87 / IALBERTA72 also push to CWOP, which would give a free read path.
+
+deployment_id: lethbridge_henderson
+training_strategy: cold_start        # target source is live-only; logger is the sole label source
+
+target:
+  station_id: CW-HENDERSON           # CONFIRM: nearest active CWOP station ID to Henderson Lake
+  connector_key: cwop
+  lat: 49.687                        # Henderson Lake (refine to the chosen station's coords)
+  lon: -112.826
+  elevation_m: 910                   # CONFIRM with chosen station
+
+neighbors:
+  # Free deep-history neighbors still apply as advection inputs (same as `lethbridge`).
+  - station_id: CYQL
+    connector_key: envcanada
+    lat: 49.630
+    lon: -112.800
+    elevation_m: 929
+  - station_id: lethbridge-demo-farm-agdm   # CONFIRM exact ACIS station code in viewer
+    connector_key: acis
+    lat: 49.689
+    lon: -112.745
+    elevation_m: 903
+
+enabled_sources: [hrdps_geomet, hrdps_caspar, cwop, envcanada, acis]
+
+nwp:
+  product: hrdps
+  live_connector: hrdps_geomet
+  historical_connector: hrdps_caspar
+  sampling: nearest_grid_cell
+
+horizon_hours: 48
+lag_hours: 6
+
+feature_groups:
+  nwp: true
+  observations: true
+
+label:
+  precip_occurrence_threshold_mm: 0.2
+
+training:
+  # No CaSPAr seed: the target (CWOP) has no free deep history, so labels exist only from
+  # the deploy date forward. The deployment is not trainable until enough logged rows exist.
+  seed: null
+  min_training_rows: 4380            # ~ 6 months of hourly logged rows before first training
+  holdout_months: 1                  # small holdout while data is scarce; grows over time
+
+output:
+  forecast_json: "forecasts/lethbridge_henderson.json"
