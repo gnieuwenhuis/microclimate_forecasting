@@ -1,0 +1,22 @@
+[importlinter]
+root_package = microclimate
+
+[importlinter:contract:layers]
+name = Layered architecture (L0 lowest -> L6 highest)
+type = layers
+layers =
+    microclimate.pipelines
+    microclimate.publication
+    microclimate.models
+    microclimate.evaluation
+    microclimate.features
+    microclimate.connectors
+    microclimate.config
+    microclimate.contracts
+
+[importlinter:contract:independence]
+name = models and evaluation are independent siblings
+type = independence
+modules =
+    microclimate.models
+    microclimate.evaluation
