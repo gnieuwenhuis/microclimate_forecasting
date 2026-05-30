@@ -60,3 +60,22 @@ def test_missing_column_fails() -> None:
     frame = _valid_frame().drop(columns=["wind_dir_deg"])
     with pytest.raises(Exception):  # noqa: B017
         FORECAST_FRAME.validate(frame)
+
+
+@pytest.mark.parametrize(
+    ("column", "bad_value"),
+    [
+        ("precip_mm", -1.0),
+        ("cloud_cover_fraction", 1.5),
+        ("solar_radiation_wm2", -10.0),
+        ("wind_speed_ms", -3.0),
+        ("wind_dir_deg", 400.0),
+        ("surface_pressure_hpa", 90000.0),  # Pa not converted to hPa
+        ("surface_pressure_hpa", 0.0),
+    ],
+)
+def test_out_of_range_physical_value_fails(column: str, bad_value: float) -> None:
+    frame = _valid_frame().copy()
+    frame[column] = [bad_value]
+    with pytest.raises(Exception):  # noqa: B017
+        FORECAST_FRAME.validate(frame)

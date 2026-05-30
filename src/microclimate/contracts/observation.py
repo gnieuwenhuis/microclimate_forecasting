@@ -12,21 +12,24 @@ OBSERVATION_FRAME = pa.DataFrameSchema(
     {
         "station_id": pa.Column(str),
         "timestamp": pa.Column("datetime64[ns, UTC]"),
+        # Physical-range checks reject invalid connector output at the L0 boundary. They
+        # apply only to non-null values, so masked-absent readings (NaN, present=False)
+        # pass. temp_c / dewpoint_c are intentionally unbounded (no natural physical range).
         "temp_c": pa.Column(float, nullable=True),
         "temp_c_present": pa.Column(bool),
         "dewpoint_c": pa.Column(float, nullable=True),
         "dewpoint_c_present": pa.Column(bool),
-        "surface_pressure_hpa": pa.Column(float, nullable=True),
+        "surface_pressure_hpa": pa.Column(float, pa.Check.in_range(800, 1100), nullable=True),  # type: ignore[reportUnknownMemberType]
         "surface_pressure_hpa_present": pa.Column(bool),
-        "precip_mm": pa.Column(float, nullable=True),
+        "precip_mm": pa.Column(float, pa.Check.ge(0), nullable=True),  # type: ignore[reportUnknownMemberType]
         "precip_mm_present": pa.Column(bool),
-        "cloud_cover_fraction": pa.Column(float, nullable=True),
+        "cloud_cover_fraction": pa.Column(float, pa.Check.in_range(0, 1), nullable=True),  # type: ignore[reportUnknownMemberType]
         "cloud_cover_fraction_present": pa.Column(bool),
-        "solar_radiation_wm2": pa.Column(float, nullable=True),
+        "solar_radiation_wm2": pa.Column(float, pa.Check.ge(0), nullable=True),  # type: ignore[reportUnknownMemberType]
         "solar_radiation_wm2_present": pa.Column(bool),
-        "wind_speed_ms": pa.Column(float, nullable=True),
+        "wind_speed_ms": pa.Column(float, pa.Check.ge(0), nullable=True),  # type: ignore[reportUnknownMemberType]
         "wind_speed_ms_present": pa.Column(bool),
-        "wind_dir_deg": pa.Column(float, nullable=True),
+        "wind_dir_deg": pa.Column(float, pa.Check.in_range(0, 360), nullable=True),  # type: ignore[reportUnknownMemberType]
         "wind_dir_deg_present": pa.Column(bool),
     },
     strict=True,

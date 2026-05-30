@@ -46,3 +46,31 @@ def test_extra_column_fails() -> None:
     frame["humidity"] = [50.0]
     with pytest.raises(Exception):  # noqa: B017
         OBSERVATION_FRAME.validate(frame)
+
+
+@pytest.mark.parametrize(
+    ("column", "bad_value"),
+    [
+        ("precip_mm", -1.0),
+        ("cloud_cover_fraction", 1.5),
+        ("solar_radiation_wm2", -10.0),
+        ("wind_speed_ms", -3.0),
+        ("wind_dir_deg", 400.0),
+        ("surface_pressure_hpa", 0.0),
+    ],
+)
+def test_out_of_range_present_value_fails(column: str, bad_value: float) -> None:
+    frame = _valid_frame().copy()
+    frame[column] = [bad_value]
+    with pytest.raises(Exception):  # noqa: B017
+        OBSERVATION_FRAME.validate(frame)
+
+
+def test_masked_absent_value_passes_range_checks() -> None:
+    # A masked-absent reading (NaN value, present=False) must NOT trip the range checks.
+    frame = _valid_frame().copy()
+    frame["cloud_cover_fraction"] = [float("nan")]
+    frame["cloud_cover_fraction_present"] = [False]
+    frame["surface_pressure_hpa"] = [float("nan")]
+    frame["surface_pressure_hpa_present"] = [False]
+    OBSERVATION_FRAME.validate(frame)
