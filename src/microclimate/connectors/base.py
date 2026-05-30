@@ -12,6 +12,27 @@ import pandas as pd
 HistoricalCoverage = Literal["deep", "shallow", "none"]
 
 
+# ---------------------------------------------------------------------------
+# Typed connector exceptions
+# ---------------------------------------------------------------------------
+
+
+class ConnectorError(Exception):
+    """Base class for all connector-level errors."""
+
+
+class SourceUnavailable(ConnectorError):
+    """Raised when a data source is unreachable or returns an unexpected error."""
+
+
+class ForecastUnavailable(ConnectorError):
+    """Raised when a forecast cannot be retrieved for the requested issue_time/location."""
+
+
+class StationNotFound(ConnectorError):
+    """Raised when the requested station_id does not exist in the source."""
+
+
 class Source(ABC):  # noqa: B024
     """Common base for every data connector."""
 
