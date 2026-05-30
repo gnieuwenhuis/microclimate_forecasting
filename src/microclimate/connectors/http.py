@@ -14,7 +14,9 @@ from microclimate.connectors.base import SourceUnavailable
 # Module-level constants
 # ---------------------------------------------------------------------------
 
-_USER_AGENT = "microclimate-forecasting (+https://github.com/gnieuwenhuis/microclimate_forecasting)"
+_USER_AGENT: str = (
+    "microclimate-forecasting (+https://github.com/gnieuwenhuis/microclimate_forecasting)"
+)
 
 # Explicit (connect_timeout, read_timeout) in seconds.
 _TIMEOUT: tuple[float, float] = (10.0, 30.0)
@@ -31,10 +33,10 @@ _RETRY = Retry(
 # Module-level session (created once, shared across calls)
 # ---------------------------------------------------------------------------
 
-SESSION = requests.Session()
-SESSION.headers["User-Agent"] = _USER_AGENT
-SESSION.mount("https://", HTTPAdapter(max_retries=_RETRY))
-SESSION.mount("http://", HTTPAdapter(max_retries=_RETRY))
+_SESSION = requests.Session()
+_SESSION.headers["User-Agent"] = _USER_AGENT
+_SESSION.mount("https://", HTTPAdapter(max_retries=_RETRY))
+_SESSION.mount("http://", HTTPAdapter(max_retries=_RETRY))
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ SESSION.mount("http://", HTTPAdapter(max_retries=_RETRY))
 # ---------------------------------------------------------------------------
 
 
-def http_get(url: str, *, params: Mapping[str, str | int] | None = None) -> str:
+def http_get(url: str, *, params: Mapping[str, str | int | float] | None = None) -> str:
     """Perform an HTTP GET and return the response body as text.
 
     Args:
@@ -56,7 +58,7 @@ def http_get(url: str, *, params: Mapping[str, str | int] | None = None) -> str:
         SourceUnavailable: On any network failure, timeout, or non-2xx HTTP status.
     """
     try:
-        response = SESSION.get(url, params=params, timeout=_TIMEOUT)
+        response = _SESSION.get(url, params=params, timeout=_TIMEOUT)
         response.raise_for_status()
     except requests.HTTPError as exc:
         raise SourceUnavailable(f"HTTP error fetching {url!r}: {exc}") from exc
