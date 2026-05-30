@@ -1,0 +1,34 @@
+name: training
+on:
+  schedule:
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "config/deployments/**"
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      deployments: ${{ steps.list.outputs.deployments }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          ids=$(ls config/deployments/*.yml | xargs -n1 basename | sed 's/\.yml$//' | jq -R . | jq -cs .)
+          echo "deployments=$ids" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        deployment: ${{ fromJson(needs.discover.outputs.deployments) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run python -m microclimate.pipelines.training --deployment ${{ matrix.deployment }}
+        env:
+          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
