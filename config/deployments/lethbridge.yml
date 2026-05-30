@@ -31,12 +31,16 @@ neighbors:
     lat: 49.6303
     lon: -112.7989
     elevation_m: 929
-  - station_id: "710547"                   # ACIS: Picture Butte LITE (N). NB: precip gauge unconfirmed
+  - station_id: "710547"                   # ACIS: Picture Butte LITE (N).
+    # Reachability CONFIRMED (spike #3): ungated ACIS AIMM daily file works for this LITE station
+    # (short-name `PictureButte`), years 2022-2026, fresh, DAILY-only (no hourly twin on ECCC).
     connector_key: acis
-    lat: 49.8867                           # CONFIRM exact station coords + elevation (gated ACIS API)
+    lat: 49.8867                           # CONFIRM exact station coords + elevation (still unverified)
     lon: -112.78
     elevation_m: null                      # CONFIRM
   - station_id: "9883"                     # ACIS: Iron Springs IMCIN (NE)
+    # STALE (spike #3): ungated ACIS AIMM file ends 2023-05-18 (2026 file is header-only); ECCC AGDM
+    # twin 42728 also ends 2023. HISTORY-ONLY (2005-2023) — NOT usable for live.
     connector_key: acis
     lat: 49.93                             # CONFIRM 2nd-decimal coords + elevation (gated ACIS API)
     lon: -112.687
@@ -47,6 +51,9 @@ neighbors:
     lon: -113.05
     elevation_m: null                      # CONFIRM elevation (gated ACIS API)
 
+# NB: ungated ACIS is DAILY-only (AIMM climate file); ungated *live hourly* is unavailable for
+# these stations (ECCC AGDM hourly twins are dead, 2023/2024). Architecture pivot is deferred —
+# see docs/spikes/0003-acis-ungated-access.md (spike #3). The acis connector slice (#1) is blocked.
 enabled_sources: [hrdps_geomet, hrdps_caspar, envcanada, acis]
 
 nwp:
