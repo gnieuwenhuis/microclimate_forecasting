@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -11,7 +11,7 @@ from microclimate.contracts.snapshot import FeatureSnapshot
 def test_valid_snapshot_constructs() -> None:
     snap = FeatureSnapshot(
         deployment_id="lethbridge",
-        issue_time=datetime(2026, 5, 30, tzinfo=timezone.utc),
+        issue_time=datetime(2026, 5, 30, tzinfo=UTC),
         nwp_features={"t2m_lead1": 11.0},
         observation_features={"target_temp_lag1": 10.5},
         observation_masks={"target_temp_lag1": True},

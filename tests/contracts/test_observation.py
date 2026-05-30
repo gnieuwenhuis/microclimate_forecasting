@@ -25,12 +25,12 @@ def test_valid_observation_frame_passes() -> None:
 
 def test_missing_mask_column_fails() -> None:
     frame = _valid_frame().drop(columns=["temp_c_present"])
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         OBSERVATION_FRAME.validate(frame)
 
 
 def test_extra_column_fails() -> None:
     frame = _valid_frame()
     frame["humidity"] = [50.0]
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         OBSERVATION_FRAME.validate(frame)
