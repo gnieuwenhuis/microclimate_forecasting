@@ -71,6 +71,7 @@ L0  contracts        (pure Pydantic/Pandera types; no internal imports)
 /
 ├── CONTEXT.md                         # exists (domain glossary)
 ├── README.md                          # one-paragraph what/why + link to CONTEXT.md
+├── DATA_LICENSES.md                   # ECCC / ACIS / CaSPAr attributions (ADR-0009)
 ├── pyproject.toml                     # uv project, deps, tool configs
 ├── uv.lock                            # committed lockfile
 ├── .importlinter                      # layer contracts
@@ -174,9 +175,11 @@ Pure data definitions. No internal imports; depends only on stdlib, Pydantic, Pa
   - Interface: Pydantic `ForecastDocument` with `schema_version: str`,
     `deployment_id: str`, `issue_time: datetime[UTC]`, `last_updated: datetime[UTC]`,
     `status: Literal["ok","stale","degraded"]`, `model_versions: {"temp": str, "pop": str}`,
+    `attribution: list[str]` (data-source acknowledgments — ADR-0009; ECCC/ACIS/CaSPAr),
     `series: list[ForecastStep]` where `ForecastStep` = `{lead_hour: int,
     valid_time: datetime[UTC], temp_c: float, pop: float in [0,1]}`.
-  - Enforces: the JSON contract; `pop` range and required fields validated.
+  - Enforces: the JSON contract; `pop` range, non-empty `attribution`, and required fields
+    validated. Contains only derived predictions — never raw observations (ADR-0009).
 - **`registry.py`**
   - Purpose: champion pointer manifest.
   - Interface: Pydantic `RegistryManifest` mapping `(deployment_id, task)` →
@@ -290,23 +293,24 @@ Pure data definitions. No internal imports; depends only on stdlib, Pydantic, Pa
 
 - **`inference.py`** (ADR-0003, ADR-0007)
   - Purpose: hourly job — load config → `validate_config_sources(config)` →
-    build snapshot from live sources → predict with champions → write forecast JSON →
-    **log the snapshot** to the training store.
+    build snapshot from live sources → predict with champions → write forecast JSON (public,
+    with `attribution`) → **log the snapshot** to the **private** training store (ADR-0009).
   - Interface: `run_inference(deployment_id: str) -> None`; module is CLI-invokable
     (`python -m microclimate.pipelines.inference --deployment <id>`).
   - Dependencies: all lower layers.
 - **`training.py`**
-  - Purpose: load config → `validate_config_sources(config)` → read training store →
-    train temp & pop → evaluate → run publish gate → update registry / upload champions on
-    promotion.
+  - Purpose: load config → `validate_config_sources(config)` → read the **private** training
+    store → train temp & pop → evaluate → run publish gate → update registry / upload
+    champions on promotion.
   - Interface: `run_training(deployment_id: str) -> None`; CLI-invokable.
 
 ### Dashboard (`dashboard/`)
 
 Static skeleton only: `index.html` + `app.js` that fetch
-`forecasts/<deployment_id>.json` from the same origin and render a placeholder. Outside the
-Python import graph (the import-linter contract does not include it). A `README.md` notes
-the `schema_version` it targets.
+`forecasts/<deployment_id>.json` from the same origin, render a placeholder, and **show the
+JSON's `attribution` strings in the footer** (ADR-0009). Outside the Python import graph (the
+import-linter contract does not include it). A `README.md` notes the `schema_version` it
+targets.
 
 ## Guardrail tooling (the ten guardrails, as files)
 
@@ -344,22 +348,26 @@ the `schema_version` it targets.
 - **`ci.yml`** — on PR/push: `uv sync`, then Ruff, Pyright (strict), import-linter, and
   Pytest. Merge-gating.
 - **`inference.yml`** — hourly `cron` + `workflow_dispatch`; matrix over
-  `config/deployments/*`; runs the inference CLI; reads secrets (Tempest/WU) from Actions
-  secrets. (Skeleton: workflow file with the trigger/matrix wiring; the step invokes the
-  stub CLI.)
+  `config/deployments/*`; runs the inference CLI; reads `DATA_REPO_TOKEN` from Actions
+  secrets to push logged snapshots to the private data repo. (Skeleton: workflow file with
+  the trigger/matrix wiring; the step invokes the stub CLI.)
 - **`training.yml`** — monthly `cron` + `workflow_dispatch` + `push` paths-filter on
-  `config/deployments/**`; matrix over deployments; runs the training CLI.
+  `config/deployments/**`; matrix over deployments; runs the training CLI; reads
+  `DATA_REPO_TOKEN` to clone the private data repo.
 
-### The four homes (documented, branches created)
+### The four homes (ADR-0003/0007/0009)
 
-| Artifact | Home |
-|---|---|
-| Forecast JSON, dashboard, `registry.json` | `gh-pages` branch (served by Pages) |
-| Model binaries (versioned) | GitHub **Release** assets, keyed `{deployment_id}/{task}/{version}` |
-| Training store (Parquet) | `training-data` branch |
-| Source, configs, docs, workflows | `main` |
+| Artifact | Home | Visibility |
+|---|---|---|
+| Forecast JSON, dashboard, `registry.json` | `gh-pages` branch (served by Pages) | **public** (derived) |
+| Model binaries (versioned) | GitHub **Release** assets, keyed `{deployment_id}/{task}/{version}` | **public** (derived) |
+| Raw training store (Parquet) | a **separate private repo**, written via `DATA_REPO_TOKEN` | **private** (raw data) |
+| Source, configs, docs, workflows | `main` | **public** (code) |
 
-Scaffolding creates orphan `gh-pages` and `training-data` branches each with a `README.md`
+Only derived works and code are public; the raw store is private for data-licensing reasons
+(ADR-0009). Scaffolding creates the public `gh-pages` branch (with a `README.md`); the
+private data repo is created separately and its push token stored as the `DATA_REPO_TOKEN`
+secret. The orphan `gh-pages` branch and the private data repo each get a `README.md`
 stating their purpose and the `schema_version` they carry.
 
 ## Acceptance criteria (definition of done for scaffolding)
@@ -383,9 +391,12 @@ The skeleton is complete when **all** hold:
 7. Every module file listed in the layout exists with its declared public interface; bodies
    are `...` / `raise NotImplementedError`. No business logic is present.
 8. The three workflow files exist with correct triggers/matrix wiring and invoke the stub
-   CLIs.
-9. `gh-pages` and `training-data` branches exist with explanatory `README.md`s.
-10. `README.md` at root links to `CONTEXT.md` and `docs/adr/`.
+   CLIs; `inference.yml`/`training.yml` reference the `DATA_REPO_TOKEN` secret.
+9. The public `gh-pages` branch exists with an explanatory `README.md`; the private data
+   repo is documented (not created by this repo's scaffolding) in `DATA_LICENSES.md`.
+10. `README.md` at root links to `CONTEXT.md` and `docs/adr/`; **`DATA_LICENSES.md`** exists
+    with the ECCC/ACIS/CaSPAr attributions, and the `ForecastDocument` defines an
+    `attribution` field rendered by the dashboard.
 
 ## Self-review notes
 

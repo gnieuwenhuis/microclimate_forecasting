@@ -137,14 +137,20 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **Training store** — the accumulating dataset of feature snapshots + labels: CaSPAr seed
   plus logged snapshots. Partitioned Parquet, per deployment.
 - **Forecast JSON** — the single published, schema-versioned output document a deployment
-  produces. The only thing thin clients read.
+  produces. The only thing thin clients read. Carries an **`attribution`** field (data-source
+  acknowledgments) and never embeds raw observations — only derived predictions (ADR-0009).
 - **Thin client** — a consumer that *only* reads the forecast JSON (never touches HRDPS,
   station feeds, or models). The dashboard and the future Android app are thin clients.
 - **Dashboard** — the v1 thin client: static files served from GitHub Pages, reading the
   forecast JSON from the same origin. Lives in this repo, outside the Python import graph.
 - **The four homes** — where artifacts live: forecast JSON + dashboard + `registry.json`
-  on `gh-pages`; model binaries as versioned GitHub **Release** assets; training data on a
-  `training-data` branch; everything else in the main branch.
+  on `gh-pages` (public); model binaries as versioned GitHub **Release** assets (public);
+  the raw **training store** in a separate **private repo** (ADR-0009); source/configs/docs
+  in the main branch (public). Three public homes carry only derived works or code; the raw
+  store is the single private home.
+- **Derived product** — a transformation of the source data (the forecast JSON, the trained
+  models). Redistributable under all source licences *with attribution*; these are the only
+  data-bearing artifacts published publicly. Raw observations/forecasts are not (ADR-0009).
 - **`registry.json`** — the manifest naming the current champion version per
   `(deployment_id, task)`. Updated by the publish gate; read by the inference pipeline.
 
@@ -156,6 +162,11 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **One HRDPS spec.** HRDPS from CaSPAr (training) and from GeoMet/Datamart (inference)
   must resolve to the identical variable/grid specification, or seed and logged data
   diverge.
+- **Attribution is mandatory.** Every public, data-bearing artifact carries source
+  attribution: ECCC (`Data Source: Environment and Climate Change Canada`), ACIS
+  (`Data provided by Agriculture and Irrigation, Alberta Climate Information Service (ACIS)`),
+  and CaSPAr (cite Mai et al. 2020). Enumerated in `DATA_LICENSES.md`, embedded in the
+  forecast JSON `attribution` field, and shown in the dashboard footer (ADR-0009).
 - **Guardrails over discipline.** Architectural rules are enforced mechanically (types,
   schemas, CI fitness functions), not by convention — see the scaffolding spec in
   `docs/superpowers/specs/`. Bad structural decisions should fail at construction or in CI.

@@ -1,7 +1,11 @@
 # 7. Self-accumulating training store: CaSPAr seed + inference logger
 
-- **Status:** Accepted
+- **Status:** Accepted — **store location amended by ADR-0009**
 - **Date:** 2026-05-30
+
+> **Amendment (ADR-0009):** the self-accumulating training store below lives in a
+> **private repo** (written via a token), not a public `training-data` branch, because it
+> holds raw observations whose redistribution rights are unsettled (ACIS).
 
 ## Context
 

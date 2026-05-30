@@ -1,7 +1,11 @@
 # 3. Server-side inference with thin clients; on-device TFLite retired
 
-- **Status:** Accepted
+- **Status:** Accepted — **storage homes amended by ADR-0009**
 - **Date:** 2026-05-30
+
+> **Amendment (ADR-0009):** the published-artifact homes below stand, but the raw
+> training-data store is **private** (a separate repo), not a public branch — only derived
+> products (forecast JSON, models) are public, for data-licensing reasons.
 
 ## Context
 
