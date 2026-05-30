@@ -10,3 +10,6 @@ __pycache__/
 
 # uv / virtualenv
 .venv/
+
+# Local git worktrees
+.claude/worktrees/
