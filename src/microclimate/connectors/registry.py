@@ -54,7 +54,9 @@ def validate_config_sources(config: DeploymentConfig) -> None:
     for station in [config.target, *config.neighbors]:
         source = get_source(station.connector_key)
         if not isinstance(source, ObservationSource):
-            raise ValueError(f"station connector {station.connector_key!r} is not an ObservationSource")
+            raise ValueError(
+                f"station connector {station.connector_key!r} is not an ObservationSource"
+            )
         if source.historical_coverage != "deep":
             raise ValueError(
                 f"source {station.connector_key!r} coverage "

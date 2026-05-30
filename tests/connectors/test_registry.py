@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 from collections.abc import Sequence
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -78,7 +78,9 @@ def _config(target_key: str, sources: list[str]) -> DeploymentConfig:
         lag_hours=6,
         feature_groups=FeatureGroupSwitches(nwp=True, observations=True),
         label=LabelConfig(precip_occurrence_threshold_mm=0.2),
-        training=TrainingConfig(seed=SeedConfig(source="caspar", start="2017-05-22"), holdout_months=12),
+        training=TrainingConfig(
+            seed=SeedConfig(source="caspar", start="2017-05-22"), holdout_months=12
+        ),
         output=OutputConfig(forecast_json="forecasts/t.json"),
     )
 
@@ -97,7 +99,9 @@ def test_duplicate_key_rejected() -> None:
             def historical_coverage(self) -> HistoricalCoverage:
                 return "deep"
 
-            def fetch_historical(self, station_id: str, start: datetime, end: datetime) -> pd.DataFrame:
+            def fetch_historical(
+                self, station_id: str, start: datetime, end: datetime
+            ) -> pd.DataFrame:
                 raise NotImplementedError
 
             def fetch_live(self, station_id: str, since: datetime) -> pd.DataFrame:

@@ -12,7 +12,7 @@ import pandas as pd
 HistoricalCoverage = Literal["deep", "shallow", "none"]
 
 
-class Source(ABC):
+class Source(ABC):  # noqa: B024
     """Common base for every data connector."""
 
 
