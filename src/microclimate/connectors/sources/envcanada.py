@@ -30,6 +30,7 @@ import pandas as pd
 from microclimate.connectors.base import HistoricalCoverage, ObservationSource, StationNotFound
 from microclimate.connectors.http import http_get
 from microclimate.connectors.registry import register_source
+from microclimate.contracts.observation import OBSERVATION_FRAME
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -48,7 +49,7 @@ _MT_B: float = 243.04  # °C
 # The sentinel column we check to verify the response is actually an ECCC station CSV.
 _REQUIRED_COLUMN_PREFIX: str = "Date/Time"
 
-# All 8 physical variable names (defines column order in output).
+# Ordered list of physical variable names (drives output column construction).
 _PHYS_VARS: tuple[str, ...] = (
     "temp_c",
     "dewpoint_c",
@@ -67,7 +68,8 @@ _PHYS_VARS: tuple[str, ...] = (
 
 
 def _try_float(value: object) -> float | None:
-    """Parse *value* to float; return None if blank / non-numeric."""
+    """Parse *value* to float; return None if blank, non-numeric, or the ECCC ``"M"``
+    missing-data sentinel (which ECCC uses to mark officially missing readings)."""
     s = str(value).strip()
     if not s:
         return None
@@ -84,7 +86,7 @@ def _magnus_tetens(t: float, rh: float) -> float:
     return _MT_B * gamma / (_MT_A - gamma)
 
 
-def _find_col(columns: pd.Index, prefix: str) -> str | None:  # type: ignore[type-arg]
+def _find_col(columns: pd.Index, prefix: str) -> str | None:  # type: ignore[reportUnknownMemberType]
     """Return the first column name whose text starts with *prefix*, or None."""
     for col in columns:
         if str(col).startswith(prefix):
@@ -92,11 +94,31 @@ def _find_col(columns: pd.Index, prefix: str) -> str | None:  # type: ignore[typ
     return None
 
 
-def _get_cell(series: pd.Series, col: str | None) -> float | None:  # type: ignore[type-arg]
+def _get_cell(series: pd.Series, col: str | None) -> float | None:  # type: ignore[reportUnknownMemberType]
     """Extract a float from *series[col]*; return None if col is None or value is non-numeric."""
     if col is None:
         return None
     return _try_float(series.get(col, ""))
+
+
+def _empty_obs_frame() -> pd.DataFrame:
+    """Return a zero-row DataFrame that conforms to OBSERVATION_FRAME.
+
+    Used as the canonical empty result whenever a valid ECCC station CSV contains
+    no reportable observation rows (e.g. an entirely future/unfilled month).
+    The frame is validated here so callers get a guaranteed-conformant result.
+    """
+    columns: dict[str, object] = {
+        "station_id": pd.Series([], dtype="object"),
+        "timestamp": pd.Series([], dtype="datetime64[ns, UTC]"),
+    }
+    for var in _PHYS_VARS:
+        columns[var] = pd.Series([], dtype="float64")
+        columns[f"{var}_present"] = pd.Series([], dtype="bool")
+
+    df: pd.DataFrame = pd.DataFrame(columns)  # type: ignore[reportUnknownMemberType]
+    OBSERVATION_FRAME.validate(df)
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -136,11 +158,14 @@ def _parse_eccc_csv(csv_text: str, station_id: str) -> pd.DataFrame:
 
     Returns:
         DataFrame conforming to OBSERVATION_FRAME (not yet Pandera-validated; caller
-        decides when to validate).
+        decides when to validate).  Returns a zero-row schema-valid frame when the
+        CSV is a legitimate ECCC station CSV that happens to have no data rows yet
+        (e.g. a future/unfilled month).
 
     Raises:
         StationNotFound: If *csv_text* is not a recognisable ECCC station CSV (i.e.
-            the required ``Date/Time (LST)`` column is absent).
+            the required ``Date/Time (LST)`` column is absent).  A valid-header CSV
+            with zero data rows does NOT raise; it returns an empty schema-valid frame.
     """
     # ------------------------------------------------------------------
     # 1. Parse raw CSV; handle UTF-8 BOM via encoding_errors-safe read.
@@ -158,6 +183,8 @@ def _parse_eccc_csv(csv_text: str, station_id: str) -> pd.DataFrame:
 
     # ------------------------------------------------------------------
     # 2. Validate the response looks like an ECCC station CSV.
+    #    A non-station body (HTML, empty, wrong format) → StationNotFound.
+    #    A valid-header CSV with zero rows → return empty schema-valid frame.
     # ------------------------------------------------------------------
     dt_col = _find_col(raw.columns, _REQUIRED_COLUMN_PREFIX)
     if dt_col is None:
@@ -255,9 +282,9 @@ def _parse_eccc_csv(csv_text: str, station_id: str) -> pd.DataFrame:
         rows.append(out)
 
     if not rows:
-        raise StationNotFound(
-            f"No valid observation rows found in ECCC response for station {station_id!r}."
-        )
+        # Valid ECCC station CSV but no reportable rows (e.g. future/unfilled month).
+        # Degrade gracefully: return empty schema-valid frame (ADR-0002).
+        return _empty_obs_frame()
 
     df: pd.DataFrame = pd.DataFrame(rows)  # type: ignore[reportUnknownMemberType]
     return df
@@ -300,10 +327,13 @@ class EnvCanadaSource(ObservationSource):
 
         Returns:
             OBSERVATION_FRAME-conformant DataFrame, sorted ascending by timestamp.
+            Returns an empty schema-valid frame when the station is valid but has
+            no observations in the requested window (ADR-0002 graceful degradation).
 
         Raises:
             SourceUnavailable: If any underlying HTTP request fails.
-            StationNotFound:   If the response is not a recognisable ECCC station CSV.
+            StationNotFound:   If the response is not a recognisable ECCC station CSV
+                               (i.e. the station does not exist at the source).
         """
         start_utc = _ensure_utc(start)
         end_utc = _ensure_utc(end)
@@ -312,6 +342,8 @@ class EnvCanadaSource(ObservationSource):
         frames: list[pd.DataFrame] = []
         for year, month in months:
             csv_text = self._fetcher(station_id, year, month)
+            # _parse_eccc_csv raises StationNotFound for a non-station body;
+            # returns an empty schema-valid frame for a valid-header-but-no-data month.
             df = _parse_eccc_csv(csv_text, station_id)
             frames.append(df)
 
@@ -324,10 +356,10 @@ class EnvCanadaSource(ObservationSource):
             combined.loc[mask].sort_values("timestamp").reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
         )
 
+        # An empty result is valid: the station exists but has no data in the window.
+        # Return the canonical empty frame (already schema-valid) rather than raising.
         if len(result) == 0:
-            raise StationNotFound(
-                f"No rows in [{start_utc}, {end_utc}] for station {station_id!r}."
-            )
+            return _empty_obs_frame()
 
         return result
 
@@ -340,6 +372,8 @@ class EnvCanadaSource(ObservationSource):
 
         Returns:
             OBSERVATION_FRAME-conformant DataFrame, sorted ascending by timestamp.
+            Returns an empty schema-valid frame when the current month has no
+            observations yet (ADR-0002 graceful degradation).
 
         Raises:
             SourceUnavailable: If the underlying HTTP request fails.
@@ -352,13 +386,17 @@ class EnvCanadaSource(ObservationSource):
         csv_text = self._fetcher(station_id, year, month)
         df = _parse_eccc_csv(csv_text, station_id)
 
+        if len(df) == 0:
+            return _empty_obs_frame()
+
         mask = df["timestamp"] >= pd.Timestamp(since_utc)
         result: pd.DataFrame = (
             df.loc[mask].sort_values("timestamp").reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
         )
 
+        # An empty result is valid: the station exists but has no data since the cutoff.
         if len(result) == 0:
-            raise StationNotFound(f"No rows since {since_utc} for station {station_id!r}.")
+            return _empty_obs_frame()
 
         return result
 

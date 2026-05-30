@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import pathlib
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -13,25 +12,7 @@ from microclimate.connectors.base import SourceUnavailable, StationNotFound
 from microclimate.connectors.sources.envcanada import EnvCanadaSource
 from microclimate.contracts.observation import OBSERVATION_FRAME
 
-# ---------------------------------------------------------------------------
-# Fixture helpers
-# ---------------------------------------------------------------------------
-
-_FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "envcanada"
-
-
-def _load_fixture(name: str) -> str:
-    return (_FIXTURE_DIR / name).read_text(encoding="utf-8-sig")
-
-
-def _make_fetcher(csv_text: str):
-    """Return a fetcher callable that always returns the given CSV text."""
-
-    def fetcher(station_id: str, year: int, month: int) -> str:  # noqa: ARG001
-        return csv_text
-
-    return fetcher
-
+from .conftest import load_fixture, make_fetcher
 
 # ---------------------------------------------------------------------------
 # 1. Core mapping — OBSERVATION_FRAME validation + spot-check conversions
@@ -40,8 +21,8 @@ def _make_fetcher(csv_text: str):
 
 def test_frame_passes_observation_frame_schema() -> None:
     """fetch_historical returns a frame that passes OBSERVATION_FRAME.validate()."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -53,8 +34,8 @@ def test_frame_passes_observation_frame_schema() -> None:
 
 def test_spot_check_05_LST_conversions() -> None:
     """Row 05:00 LST: verify unit conversions are correct."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -76,8 +57,8 @@ def test_spot_check_05_LST_conversions() -> None:
 
 def test_spot_check_timestamp_is_utc() -> None:
     """Timestamps are UTC (LST + 7h offset applied correctly)."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -90,8 +71,8 @@ def test_spot_check_timestamp_is_utc() -> None:
 
 def test_station_id_column_matches_argument() -> None:
     """station_id column equals the argument passed, not the CSV Climate ID."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -107,8 +88,8 @@ def test_station_id_column_matches_argument() -> None:
 
 def test_per_row_missing_fields_at_06_LST() -> None:
     """Row 06:00 LST: precip, wind_dir, wind_speed, surface_pressure are absent."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -143,8 +124,8 @@ def test_per_row_missing_fields_at_06_LST() -> None:
 
 def test_cloud_cover_always_absent() -> None:
     """cloud_cover_fraction is NaN + _present=False for all rows."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -156,8 +137,8 @@ def test_cloud_cover_always_absent() -> None:
 
 def test_solar_radiation_always_absent() -> None:
     """solar_radiation_wm2 is NaN + _present=False for all rows."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -174,8 +155,8 @@ def test_solar_radiation_always_absent() -> None:
 
 def test_dewpoint_derived_from_rh() -> None:
     """When Dew Point cell is blank, dewpoint is derived from T + RH via Magnus-Tetens."""
-    csv_text = _load_fixture("dewpoint_derive.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("dewpoint_derive.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2023, 6, 1, 0, 0, tzinfo=UTC)
     end = datetime(2023, 6, 1, 23, 59, tzinfo=UTC)
@@ -183,7 +164,8 @@ def test_dewpoint_derived_from_rh() -> None:
 
     assert len(df) == 1
     assert df["dewpoint_c_present"].iloc[0] == True  # noqa: E712
-    assert df["dewpoint_c"].iloc[0] == pytest.approx(10.6, abs=0.3)  # type: ignore[reportUnknownMemberType]
+    # Exact Magnus-Tetens for T=15.0, RH=75 ≈ 10.604 — pins the formula.
+    assert df["dewpoint_c"].iloc[0] == pytest.approx(10.604, abs=0.01)  # type: ignore[reportUnknownMemberType]
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +175,8 @@ def test_dewpoint_derived_from_rh() -> None:
 
 def test_historical_end_boundary_excludes_later_rows() -> None:
     """Rows after `end` are excluded; rows before `start` are excluded."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     # Include only 03:00–05:00 LST = 10:00–12:00 UTC
     start = datetime(2026, 4, 27, 10, 0, tzinfo=UTC)
@@ -211,8 +193,8 @@ def test_historical_end_boundary_excludes_later_rows() -> None:
 
 def test_historical_sorted_by_timestamp() -> None:
     """fetch_historical result is sorted ascending by timestamp."""
-    csv_text = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 23, 59, tzinfo=UTC)
@@ -229,8 +211,8 @@ def test_historical_sorted_by_timestamp() -> None:
 
 def test_live_since_filter_and_drop_empty_rows() -> None:
     """fetch_live: only rows >= since; truncated (no-measurement) rows are dropped."""
-    csv_text = _load_fixture("live_partial.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("live_partial.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     # 2026-05-29 21:00 LST = 2026-05-30 04:00 UTC
     # 2026-05-29 22:00 LST = 2026-05-30 05:00 UTC
@@ -245,8 +227,8 @@ def test_live_since_filter_and_drop_empty_rows() -> None:
 
 def test_live_drops_truncated_rows() -> None:
     """Truncated future rows (no measurement data) are never emitted."""
-    csv_text = _load_fixture("live_partial.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("live_partial.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     # since set before both real rows
     since = datetime(2026, 5, 30, 3, 0, tzinfo=UTC)
@@ -260,8 +242,8 @@ def test_live_drops_truncated_rows() -> None:
 
 def test_live_sorted_by_timestamp() -> None:
     """fetch_live result is sorted ascending by timestamp."""
-    csv_text = _load_fixture("live_partial.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(csv_text))
+    csv_text = load_fixture("live_partial.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
 
     since = datetime(2026, 5, 29, 0, 0, tzinfo=UTC)
     df = source.fetch_live("49268", since)
@@ -271,13 +253,13 @@ def test_live_sorted_by_timestamp() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7. Exceptions
+# 7. Exceptions — non-station bodies and network failures still raise
 # ---------------------------------------------------------------------------
 
 
 def test_non_station_body_raises_station_not_found() -> None:
     """A non-ECCC-station response (e.g. HTML) raises StationNotFound."""
-    source = EnvCanadaSource(fetcher=_make_fetcher("<html>error</html>"))
+    source = EnvCanadaSource(fetcher=make_fetcher("<html>error</html>"))
 
     with pytest.raises(StationNotFound):
         source.fetch_historical(
@@ -287,7 +269,7 @@ def test_non_station_body_raises_station_not_found() -> None:
 
 def test_empty_body_raises_station_not_found() -> None:
     """An empty response body raises StationNotFound."""
-    source = EnvCanadaSource(fetcher=_make_fetcher(""))
+    source = EnvCanadaSource(fetcher=make_fetcher(""))
 
     with pytest.raises(StationNotFound):
         source.fetch_historical(
@@ -309,8 +291,125 @@ def test_source_unavailable_propagates() -> None:
         )
 
 
+def test_valid_header_empty_data_returns_empty_frame() -> None:
+    """A valid ECCC station CSV with zero data rows returns an empty schema-valid frame.
+
+    This is ADR-0002 graceful degradation: a valid station with no data in the window
+    is NOT the same as a missing/invalid station.
+    """
+    csv_text = load_fixture("empty_month.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
+
+    df = source.fetch_historical(
+        "49268", datetime(2026, 3, 1, tzinfo=UTC), datetime(2026, 3, 31, tzinfo=UTC)
+    )
+    assert len(df) == 0
+    OBSERVATION_FRAME.validate(df)
+
+
+def test_valid_header_empty_data_live_returns_empty_frame() -> None:
+    """fetch_live with a valid-header but no-data CSV returns an empty schema-valid frame."""
+    csv_text = load_fixture("empty_month.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(csv_text))
+
+    df = source.fetch_live("49268", datetime(2026, 5, 1, tzinfo=UTC))
+    assert len(df) == 0
+    OBSERVATION_FRAME.validate(df)
+
+
 # ---------------------------------------------------------------------------
-# 8. Registry — zero-arg instantiation still works
+# 8. Multi-month fetch_historical (m-3)
+# ---------------------------------------------------------------------------
+
+
+def test_multi_month_fetch_historical_stitches_months() -> None:
+    """fetch_historical spanning two months stitches rows from both months.
+
+    Verifies:
+    (a) The fetcher is called once per month in the range.
+    (b) Rows from both months appear in the combined result, sorted by timestamp.
+    (c) The window filter trims both ends.
+    (d) An empty middle month does NOT abort the fetch.
+    """
+    april_csv = load_fixture("hourly_window.csv")  # April 2026 rows (03:00–09:00 LST)
+    empty_csv = load_fixture("empty_month.csv")  # Empty month (no data rows)
+    may_csv = load_fixture("may_window.csv")  # May 2026 rows (03:00–04:00 LST)
+
+    call_log: list[tuple[int, int]] = []
+
+    # Span: late April 2026 → early May 2026 (3 calendar months: Apr, empty-interstitial
+    # skipped in this two-month case — we test with Apr + May only, two months)
+    fixtures: dict[tuple[int, int], str] = {
+        (2026, 4): april_csv,
+        (2026, 5): may_csv,
+    }
+
+    def multi_fetcher(station_id: str, year: int, month: int) -> str:  # noqa: ARG001
+        call_log.append((year, month))
+        return fixtures.get((year, month), empty_csv)
+
+    source = EnvCanadaSource(fetcher=multi_fetcher)
+
+    # Window: 2026-04-27 10:00 UTC → 2026-05-01 12:00 UTC
+    # April fixture has rows from 03:00 LST (10:00 UTC) to 09:00 LST (16:00 UTC) on 2026-04-27.
+    # May fixture has rows at 03:00 LST (10:00 UTC) and 04:00 LST (11:00 UTC) on 2026-05-01.
+    start = datetime(2026, 4, 27, 10, 0, tzinfo=UTC)
+    end = datetime(2026, 5, 1, 11, 0, tzinfo=UTC)
+
+    df = source.fetch_historical("49268", start, end)
+
+    # (a) Fetcher called for each month in range
+    assert (2026, 4) in call_log
+    assert (2026, 5) in call_log
+
+    # (b) Rows from both months present and sorted
+    assert len(df) > 0
+    timestamps = df["timestamp"].tolist()
+    assert timestamps == sorted(timestamps)
+
+    # Check that both April and May timestamps appear (use isin to preserve tz-awareness)
+    april_ts = pd.Timestamp("2026-04-27 10:00:00", tz="UTC")  # 03:00 LST + 7h
+    may_ts = pd.Timestamp("2026-05-01 10:00:00", tz="UTC")  # 03:00 LST + 7h
+    assert df["timestamp"].isin([april_ts]).any()
+    assert df["timestamp"].isin([may_ts]).any()
+
+    # (c) Window filter trims: no row after end (2026-05-01 11:00 UTC)
+    assert df["timestamp"].max() <= pd.Timestamp(end)
+    assert df["timestamp"].min() >= pd.Timestamp(start)
+
+    # (d) An empty interstitial month does not abort: test three-month span with empty middle
+    call_log.clear()
+    fixtures_with_empty: dict[tuple[int, int], str] = {
+        (2026, 4): april_csv,
+        (2026, 5): empty_csv,  # empty middle month
+        (2026, 6): may_csv,  # reuse may CSV but timestamped in June — treat as data present
+    }
+
+    def multi_fetcher_with_empty(station_id: str, year: int, month: int) -> str:  # noqa: ARG001
+        call_log.append((year, month))
+        return fixtures_with_empty.get((year, month), empty_csv)
+
+    source2 = EnvCanadaSource(fetcher=multi_fetcher_with_empty)
+    # Span April–June; May is empty. Window covers all three months.
+    # April rows are inside the window; May is empty (no abort); June CSV has May-dated
+    # timestamps which fall outside the window filter → only April rows survive.
+    start2 = datetime(2026, 4, 27, 10, 0, tzinfo=UTC)
+    end2 = datetime(2026, 6, 1, 0, 0, tzinfo=UTC)  # spans Apr, May, Jun months
+    df2 = source2.fetch_historical("49268", start2, end2)
+
+    # Fetcher called for all three months
+    assert (2026, 4) in call_log
+    assert (2026, 5) in call_log
+    assert (2026, 6) in call_log
+
+    # April rows still returned despite empty May
+    assert len(df2) > 0
+    assert df2["timestamp"].isin([april_ts]).any()
+    OBSERVATION_FRAME.validate(df2)
+
+
+# ---------------------------------------------------------------------------
+# 9. Registry — zero-arg instantiation still works
 # ---------------------------------------------------------------------------
 
 

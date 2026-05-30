@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import pathlib
-from datetime import UTC
-
 import pandas as pd
 import pytest
 
@@ -11,9 +8,9 @@ from microclimate.connectors.base import NWPSource, ObservationSource
 from microclimate.connectors.registry import get_source, registered_keys
 from microclimate.contracts.observation import OBSERVATION_FRAME
 
-_KEYS = sorted(k for k in registered_keys() if not k.startswith("_"))
+from .conftest import load_fixture, make_fetcher
 
-_FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "envcanada"
+_KEYS = sorted(k for k in registered_keys() if not k.startswith("_"))
 
 # ---------------------------------------------------------------------------
 # Sources whose fetch_* is not yet implemented — skip gracefully.
@@ -44,17 +41,6 @@ def test_source_conforms_to_contract(key: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _load_fixture(name: str) -> str:
-    return (_FIXTURE_DIR / name).read_text(encoding="utf-8-sig")
-
-
-def _make_fetcher(csv_text: str):
-    def fetcher(station_id: str, year: int, month: int) -> str:  # noqa: ARG001
-        return csv_text
-
-    return fetcher
-
-
 @pytest.mark.parametrize("key", _KEYS)
 def test_source_behavioral_contract(key: str) -> None:
     """Behavioural assertions for observation sources.
@@ -75,15 +61,15 @@ def test_source_behavioral_contract(key: str) -> None:
 
 def _assert_envcanada_behavioral_contract() -> None:
     """Hermetic behavioral assertions for EnvCanadaSource."""
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from microclimate.connectors.sources.envcanada import EnvCanadaSource
 
     # ------------------------------------------------------------------
     # 1. fetch_historical — OBSERVATION_FRAME conformance + end boundary
     # ------------------------------------------------------------------
-    window_csv = _load_fixture("hourly_window.csv")
-    source = EnvCanadaSource(fetcher=_make_fetcher(window_csv))
+    window_csv = load_fixture("hourly_window.csv")
+    source = EnvCanadaSource(fetcher=make_fetcher(window_csv))
 
     start = datetime(2026, 4, 27, 0, 0, tzinfo=UTC)
     end = datetime(2026, 4, 27, 12, 0, tzinfo=UTC)  # 12:00 UTC = 05:00 LST
@@ -107,8 +93,8 @@ def _assert_envcanada_behavioral_contract() -> None:
     # ------------------------------------------------------------------
     # 2. fetch_live — since boundary + OBSERVATION_FRAME conformance
     # ------------------------------------------------------------------
-    live_csv = _load_fixture("live_partial.csv")
-    live_source = EnvCanadaSource(fetcher=_make_fetcher(live_csv))
+    live_csv = load_fixture("live_partial.csv")
+    live_source = EnvCanadaSource(fetcher=make_fetcher(live_csv))
 
     # 2026-05-29 21:00 LST = 2026-05-30 04:00 UTC; 22:00 LST = 05:00 UTC
     # Set since between the two rows to test the filter
