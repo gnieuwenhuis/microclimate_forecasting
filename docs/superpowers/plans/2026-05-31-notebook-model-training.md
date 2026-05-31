@@ -153,6 +153,7 @@ TRAINING_ROW (which is raw snapshot + labels in the training store, ADR-0012).
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -174,12 +175,13 @@ def attach_labels(
     temp = valid.map(obs["temp_c"])
     precip = valid.map(obs["precip_mm"])
 
-    occurrence = (precip >= threshold_mm).astype("Int64")
-    occurrence[precip.isna()] = pd.NA
+    # NaN where the target obs is missing, else 1/0 — built via float so the missing
+    # entries become <NA> cleanly under the nullable Int64 dtype.
+    occurrence = np.where(precip.isna().to_numpy(), np.nan, precip.to_numpy() >= threshold_mm)
 
     out = matrix.copy()
     out["label_temp_c"] = temp.astype("float64")
-    out["label_precip_occurrence"] = occurrence
+    out["label_precip_occurrence"] = pd.array(occurrence, dtype="Int64")
     return out
 ```
 
