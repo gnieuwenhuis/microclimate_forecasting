@@ -177,3 +177,49 @@ def test_upwind_alignment_nan_when_wind_absent() -> None:
     snap = build_snapshot(config, _T0, nwp, {"fake": FakeObs(frames=frames)})
     df = build_features(snap, config)
     assert df["adv_N1_upwind_align"].isna().all()
+
+
+def test_output_validates_against_feature_row() -> None:
+    from microclimate.contracts.feature_matrix import FEATURE_ROW
+
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    FEATURE_ROW.validate(df)
+
+
+def test_train_serve_column_parity() -> None:
+    config = make_config(horizon_hours=5, lag_hours=3)
+    leads = list(range(1, 6))
+
+    def snap_at(t0: datetime):
+        ts = [t0 - timedelta(hours=k) for k in range(4)]
+        obs = FakeObs(frames={s: make_obs_frame(s, ts) for s in ("T1", "N1")})
+        return build_snapshot(config, t0, FakeNWP(make_forecast_frame(t0, leads)), {"fake": obs})
+
+    train = build_features(snap_at(datetime(2019, 1, 1, 6, tzinfo=UTC)), config)
+    serve = build_features(snap_at(datetime(2026, 5, 30, 18, tzinfo=UTC)), config)
+    assert list(train.columns) == list(serve.columns)
+
+
+def test_neighbor_count_changes_columns_deterministically() -> None:
+    from microclimate.config.schema import StationRef
+
+    cfg1 = make_config(horizon_hours=5, lag_hours=3)
+    extra = [
+        StationRef(station_id="N1", connector_key="fake", lat=51.5, lon=-113.5, elevation_m=950.0),
+        StationRef(station_id="N2", connector_key="fake", lat=50.5, lon=-114.5, elevation_m=920.0),
+    ]
+    snap1, _ = _snapshot(horizon_hours=5, lag_hours=3)
+    snap2, cfg2 = _snapshot(horizon_hours=5, lag_hours=3, neighbors=extra)
+    c1 = set(build_features(snap1, cfg1).columns)
+    c2 = set(build_features(snap2, cfg2).columns)
+    assert "adv_N2_upwind_align" in c2
+    assert "adv_N2_upwind_align" not in c1
+
+
+def test_obs_off_emits_no_obs_or_adv_columns() -> None:
+    config = make_config(horizon_hours=5, lag_hours=3, observations=False)
+    snap = build_snapshot(config, _T0, FakeNWP(make_forecast_frame(_T0, list(range(1, 6)))), {})
+    df = build_features(snap, config)
+    assert not [c for c in df.columns if c.startswith(("obs_", "adv_"))]
+    assert "nwp_temp_c" in df.columns
