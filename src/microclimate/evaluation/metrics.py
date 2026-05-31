@@ -41,6 +41,20 @@ def temp_skill_by_lead(
     return out
 
 
+def nwp_pop_baseline(
+    df: pd.DataFrame,
+    threshold_mm: float,
+    *,
+    precip_col: str = "nwp_precip_mm",
+) -> pd.Series:
+    """Raw-HRDPS PoP baseline: 1.0 where forecast precip >= threshold, else 0.0.
+
+    The single definition of the PoP baseline, shared by the notebook now and the publish
+    gate later (so the threshold can't drift between them).
+    """
+    return (df[precip_col] >= threshold_mm).astype(float)
+
+
 def pop_skill_by_lead(
     df: pd.DataFrame,
     *,

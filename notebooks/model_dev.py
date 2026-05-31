@@ -26,6 +26,7 @@ import pandas as pd
 from microclimate.config.loader import load_deployment
 from microclimate.connectors.registry import get_source
 from microclimate.evaluation.metrics import (
+    nwp_pop_baseline,
     pop_skill_by_lead,
     reliability_table,
     temp_skill_by_lead,
@@ -72,9 +73,9 @@ pop.calibrate(calib)
 test = test.copy()
 test["pred_temp_c"] = temp.predict(test).to_numpy()
 test["pred_pop"] = pop.predict(test).to_numpy()
-test["baseline_pop"] = (
-    test["nwp_precip_mm"] >= config.label.precip_occurrence_threshold_mm
-).astype(float)
+test["baseline_pop"] = nwp_pop_baseline(
+    test, config.label.precip_occurrence_threshold_mm
+).to_numpy()
 
 # %% [markdown]
 # ## Temperature: skill vs raw-HRDPS baseline, by lead hour
@@ -91,7 +92,7 @@ ax1.set_title("RMSE")
 ax2.axhline(0, color="grey", lw=0.8)
 ax2.plot(ts["lead_hour"], ts["skill"])
 ax2.set_xlabel("lead hour")
-ax2.set_title("RMSE skill (>0 beats HRDPS)")
+ax2.set_title("MAE skill (>0 beats HRDPS)")
 plt.tight_layout()
 
 # %% [markdown]

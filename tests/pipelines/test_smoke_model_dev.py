@@ -13,6 +13,7 @@ import pandas as pd
 
 from microclimate.connectors.base import HistoricalCoverage, ObservationSource
 from microclimate.evaluation.metrics import (
+    nwp_pop_baseline,
     pop_skill_by_lead,
     reliability_table,
     temp_skill_by_lead,
@@ -74,9 +75,9 @@ def test_model_dev_path_runs_end_to_end() -> None:
     pop.fit(train)
     pop.calibrate(calib)
     test["pred_pop"] = pop.predict(test).to_numpy()
-    test["baseline_pop"] = (
-        test["nwp_precip_mm"] >= config.label.precip_occurrence_threshold_mm
-    ).astype(float)
+    test["baseline_pop"] = nwp_pop_baseline(
+        test, config.label.precip_occurrence_threshold_mm
+    ).to_numpy()
 
     temp_skill = temp_skill_by_lead(test)
     pop_skill = pop_skill_by_lead(test)

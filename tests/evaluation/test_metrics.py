@@ -3,10 +3,17 @@ from __future__ import annotations
 import pandas as pd
 
 from microclimate.evaluation.metrics import (
+    nwp_pop_baseline,
     pop_skill_by_lead,
     reliability_table,
     temp_skill_by_lead,
 )
+
+
+def test_nwp_pop_baseline_thresholds_inclusively() -> None:
+    df = pd.DataFrame({"nwp_precip_mm": [0.0, 0.2, 0.5]})
+    out = nwp_pop_baseline(df, threshold_mm=0.2)
+    assert list(out) == [0.0, 1.0, 1.0]  # >= threshold is occurrence
 
 
 def test_temp_skill_by_lead() -> None:
