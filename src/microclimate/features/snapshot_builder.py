@@ -20,19 +20,8 @@ import pandas as pd
 
 from microclimate.config.schema import DeploymentConfig, StationRef
 from microclimate.connectors.base import NWPSource, ObservationSource, SourceUnavailable
+from microclimate.contracts.physical_vars import PHYSICAL_VARS
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
-
-# Canonical physical variables, fixed order. Match FORECAST_FRAME / OBSERVATION_FRAME.
-_PHYSICAL_VARS: tuple[str, ...] = (
-    "temp_c",
-    "dewpoint_c",
-    "surface_pressure_hpa",
-    "precip_mm",
-    "cloud_cover_fraction",
-    "solar_radiation_wm2",
-    "wind_speed_ms",
-    "wind_dir_deg",
-)
 
 
 def _temporal_features(issue_time: datetime) -> dict[str, float]:
@@ -58,7 +47,7 @@ def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:
     out: dict[str, float] = {}
     for _, row in frame.iterrows():  # type: ignore[reportUnknownVariableType]
         lead = int(row["lead_hour"])  # type: ignore[reportUnknownArgumentType]
-        for var in _PHYSICAL_VARS:
+        for var in PHYSICAL_VARS:
             out[f"nwp_{var}_h{lead}"] = float(row[var])  # type: ignore[reportUnknownArgumentType]
     return out
 
@@ -92,7 +81,7 @@ def _align_obs_to_lag_grid(
     for k in range(lag_hours + 1):
         slot_ts = cutoff - pd.Timedelta(hours=k)
         row_idx = row_by_ts.get(slot_ts)
-        for var in _PHYSICAL_VARS:
+        for var in PHYSICAL_VARS:
             key = f"obs_{station_id}_{var}_lag{k}"
             value = float("nan")
             present = False

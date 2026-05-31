@@ -22,11 +22,9 @@ from microclimate.connectors.base import (
     NWPSource,
     ObservationSource,
 )
-from microclimate.features.snapshot_builder import (
-    _PHYSICAL_VARS,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
-)
+from microclimate.contracts.physical_vars import PHYSICAL_VARS
 
-PHYS = _PHYSICAL_VARS
+PHYS = PHYSICAL_VARS
 
 PINNED: dict[str, float] = {
     "temp_c": 15.0,
