@@ -20,3 +20,18 @@ NON_FEATURE_COLUMNS: frozenset[str] = frozenset(
 def feature_columns(rows: pd.DataFrame) -> list[str]:
     """Ordered model-input columns: every column except metadata and labels."""
     return [c for c in rows.columns if c not in NON_FEATURE_COLUMNS]
+
+
+def single_feature_schema_version(rows: pd.DataFrame) -> str:
+    """The rows' one feature_schema_version, or raise if they mix versions.
+
+    Mixing versions in a single fit would train a model whose recorded version is arbitrary
+    (the first row's) yet whose inputs are inconsistent — refuse it loudly.
+    """
+    versions = rows["feature_schema_version"].unique()
+    if len(versions) != 1:
+        raise ValueError(
+            f"rows mix feature_schema_versions {sorted(map(str, versions))}; "
+            "refusing to fit on inconsistent feature sets."
+        )
+    return str(versions[0])

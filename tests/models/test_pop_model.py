@@ -79,3 +79,26 @@ def test_empty_rows_raise_clear_error() -> None:
     model.fit(_rows())
     with pytest.raises(ValueError, match="empty"):
         model.calibrate(_rows(0))
+
+
+def test_fit_rejects_single_class() -> None:
+    rows = _rows()
+    rows["label_precip_occurrence"] = 0  # all one class
+    with pytest.raises(ValueError, match="single class"):
+        PrecipOccurrenceClassifier().fit(rows)
+
+
+def test_calibrate_rejects_single_class_slice() -> None:
+    model = PrecipOccurrenceClassifier()
+    model.fit(_rows())
+    calib = _rows()
+    calib["label_precip_occurrence"] = 1  # calib slice is single-class
+    with pytest.raises(ValueError, match="single class"):
+        model.calibrate(calib)
+
+
+def test_fit_rejects_mixed_feature_versions() -> None:
+    rows = _rows()
+    rows.loc[rows.index[0], "feature_schema_version"] = "9.9.9"
+    with pytest.raises(ValueError, match="mix feature_schema_versions"):
+        PrecipOccurrenceClassifier().fit(rows)

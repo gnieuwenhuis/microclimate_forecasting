@@ -1,7 +1,7 @@
 # Local notebook model training & exploration — design
 
 - **Date:** 2026-05-31
-- **Status:** Approved (brainstorming) — pending implementation plan
+- **Status:** Approved — implementation plan written (`docs/superpowers/plans/2026-05-31-notebook-model-training.md`) and implemented
 - **Relates to:** ADR-0004 (two LightGBM models), ADR-0011 (snapshot normalization
   boundary), ADR-0012 (feature builder read-time transform), ADR-0006 (multi-deployment /
   champion-challenger), ADR-0009 (public-derived / private-raw store).

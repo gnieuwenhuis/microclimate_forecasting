@@ -56,10 +56,11 @@ def assemble_or_load(
 ) -> pd.DataFrame:
     """Read assembled rows from a local Parquet cache, else assemble and write it.
 
-    Local-dev convenience so notebook re-runs don't re-pull CaSPAr. The cache is keyed by
-    the caller's chosen path; rotate the path when the issue-time range or snapshot schema
-    changes. Derived features are recomputed by build_features on read, so the derived
-    FEATURE_SCHEMA_VERSION is intentionally NOT part of the key (ADR-0012).
+    Local-dev convenience so notebook re-runs don't re-pull CaSPAr. The cache stores the
+    fully-assembled rows (derived features already built by build_features) and returns them
+    as-is on a hit — it does NOT re-run build_features on read. The cache is keyed solely by
+    the caller's chosen path, so rotate the path whenever anything that would change the rows
+    changes: the issue-time range, the snapshot schema, or the derived FEATURE_SCHEMA_VERSION.
     """
     if cache_path.exists():
         return pd.read_parquet(cache_path)

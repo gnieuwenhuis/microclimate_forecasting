@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from sklearn.isotonic import IsotonicRegression  # pyright: ignore[reportMissingTypeStubs]
 
-from microclimate.models._columns import feature_columns
+from microclimate.models._columns import feature_columns, single_feature_schema_version
 
 
 class PrecipOccurrenceClassifier:
@@ -30,26 +30,39 @@ class PrecipOccurrenceClassifier:
     def fit(self, rows: pd.DataFrame) -> None:
         if rows.empty:
             raise ValueError("rows is empty; nothing to fit")
+        version = single_feature_schema_version(rows)
         labeled = rows.dropna(subset=["label_precip_occurrence"])
+        if labeled.empty:
+            raise ValueError("no rows have a label_precip_occurrence; nothing to fit")
+        y = labeled["label_precip_occurrence"].astype(int)
+        if y.nunique() < 2:
+            raise ValueError(
+                "label_precip_occurrence has a single class; need both 0 and 1 to fit a "
+                "classifier (widen the training window)."
+            )
         feats = feature_columns(labeled)
         model = lgb.LGBMClassifier(
             n_estimators=300, learning_rate=0.05, num_leaves=31, random_state=0, verbose=-1
         )
-        y = labeled["label_precip_occurrence"].astype(int)
         model.fit(labeled[feats], y)  # pyright: ignore[reportUnknownMemberType]
         self._model = model
         self._features = feats
-        self._feature_schema_version = str(rows["feature_schema_version"].iloc[0])
+        self._feature_schema_version = version
         self._calibrator = None
 
     def calibrate(self, rows: pd.DataFrame) -> None:
         raw = self._raw_proba(rows)
         labeled_idx = rows["label_precip_occurrence"].notna()
+        y = rows.loc[labeled_idx, "label_precip_occurrence"].astype(int)
+        if y.empty:
+            raise ValueError("no rows have a label_precip_occurrence; nothing to calibrate")
+        if y.nunique() < 2:
+            raise ValueError(
+                "calibration slice has a single class; isotonic calibration needs both 0 and "
+                "1 (widen the calibration slice)."
+            )
         calibrator = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
-        calibrator.fit(  # pyright: ignore[reportUnknownMemberType]
-            raw[labeled_idx.to_numpy()],
-            rows.loc[labeled_idx, "label_precip_occurrence"].astype(int),
-        )
+        calibrator.fit(raw[labeled_idx.to_numpy()], y)  # pyright: ignore[reportUnknownMemberType]
         self._calibrator = calibrator
 
     def predict(self, rows: pd.DataFrame) -> pd.Series:

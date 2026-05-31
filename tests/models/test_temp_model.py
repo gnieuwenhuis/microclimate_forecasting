@@ -78,6 +78,20 @@ def test_empty_rows_raise_clear_error() -> None:
         model.predict(_rows(0))
 
 
+def test_fit_rejects_all_missing_labels() -> None:
+    rows = _rows()
+    rows["label_temp_c"] = float("nan")
+    with pytest.raises(ValueError, match="no rows have a label_temp_c"):
+        TemperatureRegressor().fit(rows)
+
+
+def test_fit_rejects_mixed_feature_versions() -> None:
+    rows = _rows()
+    rows.loc[rows.index[0], "feature_schema_version"] = "9.9.9"
+    with pytest.raises(ValueError, match="mix feature_schema_versions"):
+        TemperatureRegressor().fit(rows)
+
+
 def test_predict_uses_fit_time_columns() -> None:
     rows = _rows()
     model = TemperatureRegressor()

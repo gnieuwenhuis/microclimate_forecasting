@@ -13,7 +13,7 @@ import joblib  # pyright: ignore[reportMissingTypeStubs]
 import lightgbm as lgb
 import pandas as pd
 
-from microclimate.models._columns import feature_columns
+from microclimate.models._columns import feature_columns, single_feature_schema_version
 
 
 class TemperatureRegressor:
@@ -27,7 +27,10 @@ class TemperatureRegressor:
     def fit(self, rows: pd.DataFrame) -> None:
         if rows.empty:
             raise ValueError("rows is empty; nothing to fit")
+        version = single_feature_schema_version(rows)
         labeled = rows.dropna(subset=["label_temp_c"])
+        if labeled.empty:
+            raise ValueError("no rows have a label_temp_c; nothing to fit")
         feats = feature_columns(labeled)
         model = lgb.LGBMRegressor(
             n_estimators=300, learning_rate=0.05, num_leaves=31, random_state=0, verbose=-1
@@ -35,7 +38,7 @@ class TemperatureRegressor:
         model.fit(labeled[feats], labeled["label_temp_c"])  # pyright: ignore[reportUnknownMemberType]
         self._model = model
         self._features = feats
-        self._feature_schema_version = str(rows["feature_schema_version"].iloc[0])
+        self._feature_schema_version = version
 
     def predict(self, rows: pd.DataFrame) -> pd.Series:
         if self._model is None or self._features is None:
