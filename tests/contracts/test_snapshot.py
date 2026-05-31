@@ -29,6 +29,7 @@ def test_snapshot_schema_version_constant() -> None:
 
     assert isinstance(SNAPSHOT_SCHEMA_VERSION, str)
     assert SNAPSHOT_SCHEMA_VERSION  # non-empty
+    assert SNAPSHOT_SCHEMA_VERSION == "1.0.0"
 
 
 def test_naive_datetime_rejected() -> None:

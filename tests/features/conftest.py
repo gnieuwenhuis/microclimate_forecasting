@@ -22,17 +22,9 @@ from microclimate.connectors.base import (
     NWPSource,
     ObservationSource,
 )
+from microclimate.features.snapshot_builder import _PHYSICAL_VARS  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
 
-PHYS = (
-    "temp_c",
-    "dewpoint_c",
-    "surface_pressure_hpa",
-    "precip_mm",
-    "cloud_cover_fraction",
-    "solar_radiation_wm2",
-    "wind_speed_ms",
-    "wind_dir_deg",
-)
+PHYS = _PHYSICAL_VARS
 
 PINNED: dict[str, float] = {
     "temp_c": 15.0,
@@ -179,12 +171,3 @@ def make_config(
     )
 
 
-__all__ = [
-    "FakeNWP",
-    "FakeObs",
-    "PHYS",
-    "PINNED",
-    "make_config",
-    "make_forecast_frame",
-    "make_obs_frame",
-]

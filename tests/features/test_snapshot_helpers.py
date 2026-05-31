@@ -8,21 +8,13 @@ from datetime import UTC, datetime, timedelta
 import pandas as pd
 
 from microclimate.features.snapshot_builder import (
+    _PHYSICAL_VARS,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
     _align_obs_to_lag_grid,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
     _flatten_forecast,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
     _temporal_features,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
 )
 
-_PHYS = (
-    "temp_c",
-    "dewpoint_c",
-    "surface_pressure_hpa",
-    "precip_mm",
-    "cloud_cover_fraction",
-    "solar_radiation_wm2",
-    "wind_speed_ms",
-    "wind_dir_deg",
-)
+_PHYS = _PHYSICAL_VARS
 
 
 def _forecast_frame(lead_hours: list[int]) -> pd.DataFrame:

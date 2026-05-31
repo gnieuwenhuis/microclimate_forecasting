@@ -14,16 +14,13 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
-from microclimate.config.schema import DeploymentConfig
-from microclimate.connectors.base import NWPSource, ObservationSource
-from microclimate.contracts.snapshot import (
-    SNAPSHOT_SCHEMA_VERSION,  # noqa: F401  # type: ignore[reportUnusedImport]
-    FeatureSnapshot,
-)
+from microclimate.config.schema import DeploymentConfig, StationRef
+from microclimate.connectors.base import NWPSource, ObservationSource, SourceUnavailable
+from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
 
 # Canonical physical variables, fixed order. Match FORECAST_FRAME / OBSERVATION_FRAME.
 _PHYSICAL_VARS: tuple[str, ...] = (
@@ -38,7 +35,7 @@ _PHYSICAL_VARS: tuple[str, ...] = (
 )
 
 
-def _temporal_features(issue_time: datetime) -> dict[str, float]:  # type: ignore[reportUnusedFunction]
+def _temporal_features(issue_time: datetime) -> dict[str, float]:
     """Cyclical encodings of t0 only (hour-of-day period 24, day-of-year period 365.25).
 
     Per-lead-hour temporal encodings are built downstream, not here.
@@ -53,7 +50,7 @@ def _temporal_features(issue_time: datetime) -> dict[str, float]:  # type: ignor
     }
 
 
-def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:  # type: ignore[reportUnusedFunction]
+def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:
     """FORECAST_FRAME (one row per lead hour) → {nwp_{var}_h{lead}: value}.
 
     Target-cell forecast values only; no masks (NWP is complete-or-fail).
@@ -66,7 +63,7 @@ def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:  # type: ignore[
     return out
 
 
-def _align_obs_to_lag_grid(  # type: ignore[reportUnusedFunction]
+def _align_obs_to_lag_grid(
     frame: pd.DataFrame | None,
     station_id: str,
     issue_time: datetime,
@@ -116,4 +113,52 @@ def build_snapshot(
     nwp: NWPSource,
     observations: Mapping[str, ObservationSource],
 ) -> FeatureSnapshot:
-    raise NotImplementedError
+    """Build the one FeatureSnapshot for `issue_time` (see module docstring / ADR-0011)."""
+    issue_utc = issue_time if issue_time.tzinfo is not None else issue_time.replace(tzinfo=UTC)
+    lead_hours = tuple(range(1, config.horizon_hours + 1))
+
+    # --- NWP (target cell only) — hard fail on connector errors (they propagate). ---
+    nwp_features: dict[str, float] = {}
+    if config.feature_groups.nwp:
+        frame = nwp.fetch_forecast(issue_utc, config.target.lat, config.target.lon, lead_hours)
+        nwp_features = _flatten_forecast(frame)
+
+    # --- Observations — degrade per station; StationNotFound propagates. ---
+    obs_features: dict[str, float] = {}
+    obs_masks: dict[str, bool] = {}
+    if config.feature_groups.observations:
+        start = issue_utc - timedelta(hours=config.lag_hours)
+        refs: list[StationRef] = [config.target, *config.neighbors]
+        for ref in refs:
+            source = observations[ref.connector_key]
+            station_frame: pd.DataFrame | None
+            try:
+                station_frame = source.fetch_historical(ref.station_id, start, issue_utc)
+            except SourceUnavailable:
+                # Transient infra failure → degrade this station to all-absent.
+                station_frame = None
+            feats, masks = _align_obs_to_lag_grid(
+                station_frame, ref.station_id, issue_utc, config.lag_hours
+            )
+            obs_features.update(feats)
+            obs_masks.update(masks)
+
+    # --- Static (target only) — NaN elevation when unknown. ---
+    elevation = config.target.elevation_m
+    static_features: dict[str, float] = {
+        "static_lat": float(config.target.lat),
+        "static_lon": float(config.target.lon),
+        "static_elevation_m": float(elevation) if elevation is not None else float("nan"),
+    }
+
+    return FeatureSnapshot(
+        deployment_id=config.deployment_id,
+        issue_time=issue_utc,
+        nwp_features=nwp_features,
+        observation_features=obs_features,
+        observation_masks=obs_masks,
+        static_features=static_features,
+        temporal_features=_temporal_features(issue_utc),
+        lead_hours=lead_hours,
+        schema_version=SNAPSHOT_SCHEMA_VERSION,
+    )
