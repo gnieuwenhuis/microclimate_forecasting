@@ -13,3 +13,7 @@ __pycache__/
 
 # Local git worktrees
 .claude/worktrees/
+
+# Notebook (local model-dev)
+notebooks/_artifacts/
+notebooks/*.ipynb

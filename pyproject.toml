@@ -37,6 +37,11 @@ dev = [
   "types-PyYAML>=6.0",
   "types-requests",
 ]
+notebook = [
+  "jupyter>=1.0",
+  "jupytext>=1.16",
+  "matplotlib>=3.8",
+]
 
 [tool.ruff]
 line-length = 100
