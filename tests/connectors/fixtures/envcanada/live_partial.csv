@@ -1,0 +1,6 @@
+"Longitude (x)","Latitude (y)","Station Name","Climate ID","Date/Time (LST)","Year","Month","Day","Time (LST)","Flag","Temp (°C)","Temp Flag","Dew Point Temp (°C)","Dew Point Temp Flag","Rel Hum (%)","Rel Hum Flag","Precip. Amount (mm)","Precip. Amount Flag","Wind Dir (10s deg)","Wind Dir Flag","Wind Spd (km/h)","Wind Spd Flag","Visibility (km)","Visibility Flag","Stn Press (kPa)","Stn Press Flag","Hmdx","Hmdx Flag","Wind Chill","Wind Chill Flag","Weather"
+"-112.80","49.63","LETHBRIDGE","3033875","2026-05-29 21:00","2026","05","29","21:00","","17.3","","10.3","","63","","0.0","","19","","28","","16.1","","90.17","","","","","","NA"
+"-112.80","49.63","LETHBRIDGE","3033875","2026-05-29 22:00","2026","05","29","22:00","","16.5","","9.2","","62","","0.0","","21","","21","","16.1","","90.17","","","","","","NA"
+"-112.80","49.63","LETHBRIDGE","3033875","2026-05-30 00:00","2026","05","30","00:00"
+"-112.80","49.63","LETHBRIDGE","3033875","2026-05-30 01:00","2026","05","30","01:00"
+"-112.80","49.63","LETHBRIDGE","3033875","2026-05-31 23:00","2026","05","31","23:00"

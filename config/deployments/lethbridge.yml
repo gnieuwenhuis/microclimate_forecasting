@@ -26,7 +26,10 @@ target:
 neighbors:
   # Free sources only. YQL is the regional baseline; ACIS county stations are the
   # storm-advection vectors called out in the PoP literature (north/NE/SW of the city).
-  - station_id: "3033875"                  # ECCC Lethbridge Airport (TC: YQL, MSC stnID 2263)
+  - station_id: "49268"                    # ECCC Lethbridge Airport, TC YQL. MSC StationID for the
+                                           # bulk hourly endpoint; Climate ID 3033875, hourly 2011–present
+                                           # (ECCC station inventory). NB: stnID 2263 / "LETHBRIDGE A" is
+                                           # the decommissioned 1938–2008 station — do not use.
     connector_key: envcanada
     lat: 49.6303
     lon: -112.7989

@@ -9,6 +9,7 @@ dependencies = [
   "pandas>=2.2",
   "lightgbm>=4.3",
   "pyyaml>=6.0",
+  "requests>=2.31",
 ]
 
 [project.scripts]
@@ -30,6 +31,7 @@ dev = [
   "pytest>=8.0",
   "pandas-stubs>=2.2",
   "types-PyYAML>=6.0",
+  "types-requests",
 ]
 
 [tool.ruff]
@@ -48,3 +50,5 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["network: hits real external services; deselected by default"]
+addopts = "-m 'not network'"
