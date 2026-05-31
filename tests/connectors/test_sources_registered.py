@@ -6,15 +6,15 @@ from microclimate.connectors.registry import get_source, registered_keys
 
 
 def test_all_v1_sources_registered() -> None:
-    assert {"hrdps_geomet", "hrdps_caspar", "envcanada", "acis"} <= registered_keys()
+    assert {"hrdps_datamart", "hrdps_caspar", "envcanada", "acis"} <= registered_keys()
 
 
 def test_nwp_sources_typed() -> None:
-    geomet = get_source("hrdps_geomet")
+    datamart = get_source("hrdps_datamart")
     caspar = get_source("hrdps_caspar")
-    assert isinstance(geomet, NWPSource)
+    assert isinstance(datamart, NWPSource)
     assert isinstance(caspar, NWPSource)
-    assert geomet.is_live is True
+    assert datamart.is_live is True
     assert caspar.is_live is False
 
 

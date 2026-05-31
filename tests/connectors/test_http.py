@@ -8,16 +8,21 @@ import pytest
 import requests
 
 from microclimate.connectors.base import SourceUnavailable
-from microclimate.connectors.http import http_get
+from microclimate.connectors.http import http_get, http_get_bytes
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_response(text: str, status_code: int = 200) -> MagicMock:
+def _make_response(
+    text: str = "",
+    status_code: int = 200,
+    content: bytes = b"",
+) -> MagicMock:
     resp = MagicMock(spec=requests.Response)
     resp.text = text
+    resp.content = content or text.encode()
     resp.status_code = status_code
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
@@ -182,3 +187,62 @@ def test_success_passes_float_params(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _, call_kwargs = mock_get.call_args
     assert call_kwargs.get("params") == {"lat": 51.5, "lon": -0.12}
+
+
+# ---------------------------------------------------------------------------
+# http_get_bytes — success path
+# ---------------------------------------------------------------------------
+
+
+def test_get_bytes_success_returns_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """http_get_bytes returns response.content (bytes) on a 200 OK."""
+    binary_body = b"\x1f\x8b\x08\x00GRIB binary payload"
+    mock_get = MagicMock(return_value=_make_response(content=binary_body))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    result = http_get_bytes("https://example.com/file.grib2")
+
+    assert result == binary_body
+    assert isinstance(result, bytes)
+
+
+def test_get_bytes_success_passes_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Query params are forwarded to Session.get by http_get_bytes."""
+    mock_get = MagicMock(return_value=_make_response(content=b"data"))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    http_get_bytes("https://example.com/file.grib2", params={"run": "00", "step": 3})
+
+    _, call_kwargs = mock_get.call_args
+    assert call_kwargs.get("params") == {"run": "00", "step": 3}
+
+
+# ---------------------------------------------------------------------------
+# http_get_bytes — failure path → SourceUnavailable
+# ---------------------------------------------------------------------------
+
+
+def test_get_bytes_http_error_raises_source_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-2xx HTTP response from http_get_bytes raises SourceUnavailable."""
+    mock_get = MagicMock(return_value=_make_response(status_code=404))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    with pytest.raises(SourceUnavailable) as exc_info:
+        http_get_bytes("https://example.com/missing.grib2")
+
+    assert exc_info.value.__cause__ is not None
+
+
+def test_get_bytes_connection_error_raises_source_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A requests.ConnectionError from http_get_bytes raises SourceUnavailable."""
+    mock_get = MagicMock(side_effect=requests.ConnectionError("refused"))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    with pytest.raises(SourceUnavailable) as exc_info:
+        http_get_bytes("https://example.com/file.grib2")
+
+    assert exc_info.value.__cause__ is not None

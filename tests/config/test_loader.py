@@ -12,8 +12,8 @@ def test_lethbridge_is_listed() -> None:
 def test_load_lethbridge_returns_config() -> None:
     config = load_deployment("lethbridge")
     assert config.deployment_id == "lethbridge"
-    assert config.target.connector_key == "acis"
-    assert config.target.station_id == "9835"
+    assert config.target.connector_key == "envcanada"
+    assert config.target.station_id == "2265"
 
 
 def test_missing_deployment_raises() -> None:

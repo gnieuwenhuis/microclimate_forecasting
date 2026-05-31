@@ -40,6 +40,31 @@ _SESSION.mount("http://", HTTPAdapter(max_retries=_RETRY))
 
 
 # ---------------------------------------------------------------------------
+# Internal shared request helper
+# ---------------------------------------------------------------------------
+
+
+def _do_get(
+    url: str, *, params: Mapping[str, str | int | float] | None = None
+) -> requests.Response:
+    """Perform an HTTP GET with shared error-handling; return the Response.
+
+    Raises:
+        SourceUnavailable: On any network failure, timeout, or non-2xx HTTP status.
+    """
+    try:
+        response = _SESSION.get(url, params=params, timeout=_TIMEOUT)
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise SourceUnavailable(f"HTTP error fetching {url!r}: {exc}") from exc
+    except (requests.ConnectionError, requests.Timeout) as exc:
+        raise SourceUnavailable(f"Network error fetching {url!r}: {exc}") from exc
+    except requests.RequestException as exc:
+        raise SourceUnavailable(f"Request failed for {url!r}: {exc}") from exc
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -57,13 +82,22 @@ def http_get(url: str, *, params: Mapping[str, str | int | float] | None = None)
     Raises:
         SourceUnavailable: On any network failure, timeout, or non-2xx HTTP status.
     """
-    try:
-        response = _SESSION.get(url, params=params, timeout=_TIMEOUT)
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        raise SourceUnavailable(f"HTTP error fetching {url!r}: {exc}") from exc
-    except (requests.ConnectionError, requests.Timeout) as exc:
-        raise SourceUnavailable(f"Network error fetching {url!r}: {exc}") from exc
-    except requests.RequestException as exc:
-        raise SourceUnavailable(f"Request failed for {url!r}: {exc}") from exc
-    return response.text
+    return _do_get(url, params=params).text
+
+
+def http_get_bytes(url: str, *, params: Mapping[str, str | int | float] | None = None) -> bytes:
+    """Perform an HTTP GET and return the response body as bytes.
+
+    Useful for binary formats such as GRIB2.
+
+    Args:
+        url:    Absolute URL to fetch.
+        params: Optional query parameters to append to the URL.
+
+    Returns:
+        The response body as raw bytes (``response.content``).
+
+    Raises:
+        SourceUnavailable: On any network failure, timeout, or non-2xx HTTP status.
+    """
+    return _do_get(url, params=params).content
