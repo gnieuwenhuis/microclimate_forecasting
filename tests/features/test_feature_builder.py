@@ -140,3 +140,40 @@ def test_valid_hour_encoding_per_lead() -> None:
     row = df.loc[df["lead_hour"] == 3].iloc[0]
     assert row["valid_hour_sin"] == pytest.approx(math.sin(2 * math.pi * 3 / 24.0))
     assert row["valid_hour_cos"] == pytest.approx(math.cos(2 * math.pi * 3 / 24.0))
+
+
+from microclimate.features.feature_builder import _bearing_deg  # noqa: PLC2701
+
+
+def test_bearing_due_east_is_90() -> None:
+    b = _bearing_deg(51.0, -114.0, 51.0, -113.0)
+    assert b == pytest.approx(90.0, abs=0.5)
+
+
+def test_advection_gradients_zero_when_neighbor_equals_target() -> None:
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    assert (df["adv_N1_temp_grad_lag0"] == 0.0).all()
+    assert (df["adv_N1_dpd_grad_lag0"] == 0.0).all()
+    assert (df["adv_N1_precip_grad_lag0"] == 0.0).all()
+
+
+def test_upwind_alignment_matches_formula() -> None:
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    bearing = _bearing_deg(51.0, -114.0, 51.5, -113.5)
+    expected = math.cos(math.radians(bearing - PINNED["wind_dir_deg"])) * PINNED["wind_speed_ms"]
+    assert df["adv_N1_upwind_align"].to_numpy() == pytest.approx(expected)
+
+
+def test_upwind_alignment_nan_when_wind_absent() -> None:
+    config = make_config(horizon_hours=5, lag_hours=3)
+    ts = [_T0 - timedelta(hours=k) for k in range(4)]
+    frames = {
+        "T1": make_obs_frame("T1", ts, absent={(0, "wind_dir_deg"), (0, "wind_speed_ms")}),
+        "N1": make_obs_frame("N1", ts),
+    }
+    nwp = FakeNWP(make_forecast_frame(_T0, list(range(1, 6))))
+    snap = build_snapshot(config, _T0, nwp, {"fake": FakeObs(frames=frames)})
+    df = build_features(snap, config)
+    assert df["adv_N1_upwind_align"].isna().all()

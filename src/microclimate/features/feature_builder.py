@@ -18,6 +18,15 @@ from microclimate.config.schema import DeploymentConfig
 from microclimate.contracts.feature_matrix import FEATURE_SCHEMA_VERSION
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
 
+def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Initial great-circle bearing in degrees [0, 360) from point 1 to point 2."""
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dlon = math.radians(lon2 - lon1)
+    x = math.sin(dlon) * math.cos(phi2)
+    y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
+
+
 # Canonical physical variables, fixed order — must match snapshot_builder._PHYSICAL_VARS.
 _PHYSICAL_VARS: tuple[str, ...] = (
     "temp_c",
@@ -87,6 +96,26 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
         dpd0 = obs.get(f"obs_{tgt}_temp_c_lag0", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag0", math.nan)
         dpd3 = obs.get(f"obs_{tgt}_temp_c_lag3", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag3", math.nan)
         df[f"obs_{tgt}_dpd_tend_3h"] = dpd0 - dpd3
+
+    # --- Advection (per neighbor): neighbor-target gradients at lag0 + upwind alignment. ---
+    if snapshot.observation_features and config.neighbors:
+        obs = snapshot.observation_features  # re-bind (guard ensures non-empty; avoids unbound)
+        tgt = config.target.station_id
+        wind_from = obs.get(f"obs_{tgt}_wind_dir_deg_lag0", math.nan)
+        wind_speed = obs.get(f"obs_{tgt}_wind_speed_ms_lag0", math.nan)
+        t_temp = obs.get(f"obs_{tgt}_temp_c_lag0", math.nan)
+        t_precip = obs.get(f"obs_{tgt}_precip_mm_lag0", math.nan)
+        t_dpd = t_temp - obs.get(f"obs_{tgt}_dewpoint_c_lag0", math.nan)
+        for ref in config.neighbors:
+            nid = ref.station_id
+            n_temp = obs.get(f"obs_{nid}_temp_c_lag0", math.nan)
+            n_precip = obs.get(f"obs_{nid}_precip_mm_lag0", math.nan)
+            n_dpd = n_temp - obs.get(f"obs_{nid}_dewpoint_c_lag0", math.nan)
+            df[f"adv_{nid}_temp_grad_lag0"] = n_temp - t_temp
+            df[f"adv_{nid}_dpd_grad_lag0"] = n_dpd - t_dpd
+            df[f"adv_{nid}_precip_grad_lag0"] = n_precip - t_precip
+            bearing = _bearing_deg(config.target.lat, config.target.lon, ref.lat, ref.lon)
+            df[f"adv_{nid}_upwind_align"] = math.cos(math.radians(bearing - wind_from)) * wind_speed
 
     # --- Static (target only; broadcast). ---
     for key, value in snapshot.static_features.items():
