@@ -3,28 +3,14 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import xarray as xr
 
+from microclimate.connectors.sources.hrdps_datamart import HRDPS_VAR_MAP as VAR_MAP  # noqa: F401
+
 _FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "envcanada"
-
-# ---------------------------------------------------------------------------
-# var_map: canonical name → HRDPS-ish dataset variable name
-# Exposed here so both test_nwp_core.py and future connector tests share it.
-# ---------------------------------------------------------------------------
-
-VAR_MAP: Mapping[str, str] = {
-    "temp_c": "t2m",
-    "dewpoint_c": "d2m",
-    "surface_pressure_hpa": "sp",
-    "precip_mm": "tp",
-    "cloud_cover_fraction": "tcc",
-    "solar_radiation_wm2": "dswrf",
-    "wind_speed_ms": "si10",
-    "wind_dir_deg": "wdir10",
-}
 
 
 def build_hrdps_dataset(
@@ -131,17 +117,22 @@ def build_hrdps_dataset(
         "longitude": xr.DataArray(lon_data, dims=dims_yx),
     }
 
+    # Map canonical name → per-variable numpy array, keyed by the shortName
+    # that VAR_MAP assigns.  Building the dict from VAR_MAP.values() ensures
+    # this fixture never silently drifts from the production mapping.
+    _data_by_short_name: dict[str, np.ndarray] = {
+        VAR_MAP["temp_c"]: t2m_data,
+        VAR_MAP["dewpoint_c"]: d2m_data,
+        VAR_MAP["surface_pressure_hpa"]: sp_data,
+        VAR_MAP["precip_mm"]: tp_data,
+        VAR_MAP["cloud_cover_fraction"]: tcc_data,
+        VAR_MAP["solar_radiation_wm2"]: dswrf_data,
+        VAR_MAP["wind_speed_ms"]: si10_data,
+        VAR_MAP["wind_dir_deg"]: wdir10_data,
+    }
+
     ds = xr.Dataset(
-        {
-            "t2m": xr.DataArray(t2m_data, dims=dims_lh_yx),
-            "d2m": xr.DataArray(d2m_data, dims=dims_lh_yx),
-            "sp": xr.DataArray(sp_data, dims=dims_lh_yx),
-            "tp": xr.DataArray(tp_data, dims=dims_lh_yx),
-            "tcc": xr.DataArray(tcc_data, dims=dims_lh_yx),
-            "dswrf": xr.DataArray(dswrf_data, dims=dims_lh_yx),
-            "si10": xr.DataArray(si10_data, dims=dims_lh_yx),
-            "wdir10": xr.DataArray(wdir10_data, dims=dims_lh_yx),
-        },
+        {k: xr.DataArray(v, dims=dims_lh_yx) for k, v in _data_by_short_name.items()},
         coords=coords,
     )
     return ds

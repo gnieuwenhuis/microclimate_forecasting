@@ -118,45 +118,48 @@ def test_happy_path_pinned_cloud_cover_fraction() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2. ForecastUnavailable propagation
+# 2. Exception contract
 # ---------------------------------------------------------------------------
 
 
-def test_source_unavailable_from_opener_raises_forecast_unavailable() -> None:
-    """opener raising SourceUnavailable → fetch_forecast raises ForecastUnavailable."""
+def test_source_unavailable_from_opener_propagates_unchanged() -> None:
+    """opener raising SourceUnavailable → fetch_forecast propagates SourceUnavailable."""
 
     def failing_opener(issue_time: datetime, lead_hours: object) -> None:  # type: ignore[return]  # intentionally raises
         raise SourceUnavailable("Datamart unreachable")
 
     source = HrdpsDatamartSource(opener=failing_opener)  # type: ignore[arg-type]
-    with pytest.raises(ForecastUnavailable) as exc_info:
+    with pytest.raises(SourceUnavailable):
         source.fetch_forecast(issue_time=_ISSUE_TIME, lat=_LAT, lon=_LON, lead_hours=_LEAD_HOURS)
-    # Cause must be chained.
-    assert isinstance(exc_info.value.__cause__, SourceUnavailable)
 
 
-def test_value_error_from_opener_raises_forecast_unavailable() -> None:
-    """opener raising ValueError → fetch_forecast raises ForecastUnavailable."""
+def test_forecast_unavailable_from_opener_propagates_unchanged() -> None:
+    """opener raising ForecastUnavailable → fetch_forecast propagates ForecastUnavailable."""
 
     def failing_opener(issue_time: datetime, lead_hours: object) -> None:  # type: ignore[return]  # intentionally raises
-        raise ValueError("truncated run")
+        raise ForecastUnavailable("run missing")
 
     source = HrdpsDatamartSource(opener=failing_opener)  # type: ignore[arg-type]
-    with pytest.raises(ForecastUnavailable) as exc_info:
+    with pytest.raises(ForecastUnavailable):
         source.fetch_forecast(issue_time=_ISSUE_TIME, lat=_LAT, lon=_LON, lead_hours=_LEAD_HOURS)
+
+
+def test_truncated_run_missing_lead_hour_raises_forecast_unavailable() -> None:
+    """Opener returning dataset missing lead_hour=0 → core raises ValueError → ForecastUnavailable.
+
+    This is the hermetic truncated-run test: no cfgrib, no network.  The opener
+    returns a synthetic dataset that is missing lead_hour=0, which is required
+    for de-accumulation when lead_hours=[1].  The core raises ValueError and
+    fetch_forecast must wrap it as ForecastUnavailable with the ValueError chained
+    as __cause__.
+    """
+    # build_hrdps_dataset with lead_hours=(1, 2, 3) — missing hour 0.
+    ds = build_hrdps_dataset(lead_hours=(1, 2, 3))
+    source = HrdpsDatamartSource(opener=lambda _issue, _leads: ds)
+    with pytest.raises(ForecastUnavailable) as exc_info:
+        source.fetch_forecast(issue_time=_ISSUE_TIME, lat=_LAT, lon=_LON, lead_hours=[1])
+    # The core's ValueError must be chained as __cause__.
     assert isinstance(exc_info.value.__cause__, ValueError)
-
-
-def test_os_error_from_opener_raises_forecast_unavailable() -> None:
-    """opener raising OSError → fetch_forecast raises ForecastUnavailable."""
-
-    def failing_opener(issue_time: datetime, lead_hours: object) -> None:  # type: ignore[return]  # intentionally raises
-        raise OSError("disk I/O failure")
-
-    source = HrdpsDatamartSource(opener=failing_opener)  # type: ignore[arg-type]
-    with pytest.raises(ForecastUnavailable) as exc_info:
-        source.fetch_forecast(issue_time=_ISSUE_TIME, lat=_LAT, lon=_LON, lead_hours=_LEAD_HOURS)
-    assert isinstance(exc_info.value.__cause__, OSError)
 
 
 # ---------------------------------------------------------------------------

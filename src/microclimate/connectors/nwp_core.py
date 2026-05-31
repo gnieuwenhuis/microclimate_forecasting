@@ -1,7 +1,7 @@
 """Shared xarray.Dataset → FORECAST_FRAME normalisation core for HRDPS connectors.
 
 This module encodes **HRDPS v1 unit conventions** and is shared by both HRDPS
-connectors (hrdps_geomet/Datamart, issue-5; hrdps_caspar/CaSPAr, issue-6).  The
+connectors (hrdps_datamart, issue-5; hrdps_caspar/CaSPAr, issue-6).  The
 seam — GRIB2 download + cfgrib decode — lives in each connector; this core is
 pure xarray/numpy with no I/O and no cfgrib dependency.
 
