@@ -50,6 +50,10 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# Notebook plotting cells deliberately pack axis setup onto single semicolon-joined lines.
+"notebooks/*.py" = ["E702"]
+
 [tool.pyright]
 include = ["src", "tests"]
 pythonVersion = "3.12"
