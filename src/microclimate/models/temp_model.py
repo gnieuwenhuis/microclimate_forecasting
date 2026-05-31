@@ -25,6 +25,8 @@ class TemperatureRegressor:
         self._feature_schema_version: str | None = None
 
     def fit(self, rows: pd.DataFrame) -> None:
+        if rows.empty:
+            raise ValueError("rows is empty; nothing to fit")
         labeled = rows.dropna(subset=["label_temp_c"])
         feats = feature_columns(labeled)
         model = lgb.LGBMRegressor(
@@ -38,6 +40,8 @@ class TemperatureRegressor:
     def predict(self, rows: pd.DataFrame) -> pd.Series:
         if self._model is None or self._features is None:
             raise RuntimeError("call fit() before predict()")
+        if rows.empty:
+            raise ValueError("rows is empty; nothing to predict")
         got = str(rows["feature_schema_version"].iloc[0])
         if got != self._feature_schema_version:
             raise ValueError(

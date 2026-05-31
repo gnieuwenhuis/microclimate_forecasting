@@ -28,6 +28,8 @@ class PrecipOccurrenceClassifier:
         self._feature_schema_version: str | None = None
 
     def fit(self, rows: pd.DataFrame) -> None:
+        if rows.empty:
+            raise ValueError("rows is empty; nothing to fit")
         labeled = rows.dropna(subset=["label_precip_occurrence"])
         feats = feature_columns(labeled)
         model = lgb.LGBMClassifier(
@@ -62,6 +64,8 @@ class PrecipOccurrenceClassifier:
     def _raw_proba(self, rows: pd.DataFrame) -> np.ndarray:
         if self._model is None or self._features is None:
             raise RuntimeError("call fit() before calibrate()/predict()")
+        if rows.empty:
+            raise ValueError("rows is empty; nothing to predict")
         got = str(rows["feature_schema_version"].iloc[0])
         if got != self._feature_schema_version:
             raise ValueError(

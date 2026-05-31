@@ -67,3 +67,24 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     reloaded = TemperatureRegressor.load(path)
     after = reloaded.predict(rows)
     pd.testing.assert_series_equal(before, after)
+
+
+def test_empty_rows_raise_clear_error() -> None:
+    model = TemperatureRegressor()
+    with pytest.raises(ValueError, match="empty"):
+        model.fit(_rows(0))
+    model.fit(_rows())
+    with pytest.raises(ValueError, match="empty"):
+        model.predict(_rows(0))
+
+
+def test_predict_uses_fit_time_columns() -> None:
+    rows = _rows()
+    model = TemperatureRegressor()
+    model.fit(rows)
+    # Reordered columns still predict (stored fit-time order is used).
+    reordered = rows[rows.columns[::-1]]
+    pd.testing.assert_series_equal(model.predict(rows), model.predict(reordered))
+    # A dropped feature column fails loud.
+    with pytest.raises(KeyError):
+        model.predict(rows.drop(columns=["nwp_temp_c"]))

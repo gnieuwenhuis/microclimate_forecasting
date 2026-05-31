@@ -146,6 +146,9 @@ weather agency**. It corrects an existing official forecast for local bias.
   rather than one model per hour.
 - **Calibration** — the property (and the post-training stage that enforces it) that a
   PoP value means what it says: "30%" should rain ~30% of the time. The PoP deliverable.
+- **Calibration slice** — the disjoint chronological slice between train and test on which
+  the PoP isotonic calibrator is fit, so calibration is not fit on overconfident in-sample
+  predictions.
 - **Baseline** / **raw HRDPS** — the unmodified HRDPS forecast at the target. The floor a
   model must beat to justify the project's existence.
 - **Skill score** — a metric expressing improvement over a baseline (e.g. MAE skill for

@@ -70,3 +70,12 @@ def test_save_load_roundtrip(tmp_path: Path) -> None:
     model.save(path)
     after = PrecipOccurrenceClassifier.load(path).predict(rows)
     pd.testing.assert_series_equal(before, after)
+
+
+def test_empty_rows_raise_clear_error() -> None:
+    model = PrecipOccurrenceClassifier()
+    with pytest.raises(ValueError, match="empty"):
+        model.fit(_rows(0))
+    model.fit(_rows())
+    with pytest.raises(ValueError, match="empty"):
+        model.calibrate(_rows(0))
