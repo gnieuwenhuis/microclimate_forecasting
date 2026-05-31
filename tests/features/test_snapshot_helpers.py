@@ -100,6 +100,8 @@ def test_align_present_values_land_in_correct_lag() -> None:
     assert set(feats) == set(masks)
     assert feats["obs_S1_temp_c_lag0"] == 15.0
     assert masks["obs_S1_temp_c_lag0"] is True
+    assert feats["obs_S1_temp_c_lag1"] == 15.0
+    assert masks["obs_S1_temp_c_lag1"] is True
     assert feats["obs_S1_surface_pressure_hpa_lag2"] == 900.0
 
 
@@ -138,3 +140,11 @@ def test_align_none_frame_all_absent() -> None:
     assert len(feats) == 8 * 3
     assert all(m is False for m in masks.values())
     assert all(math.isnan(v) for v in feats.values())
+
+
+def test_align_off_hour_t0_all_absent() -> None:
+    # Documented behavior: issue_time is NOT floored; an off-hour t0 matches no rows.
+    t0_half = _T0.replace(minute=30)
+    feats, masks = _align_obs_to_lag_grid(_obs_frame("S1", [_T0]), "S1", t0_half, lag_hours=0)
+    assert masks["obs_S1_temp_c_lag0"] is False
+    assert math.isnan(feats["obs_S1_temp_c_lag0"])

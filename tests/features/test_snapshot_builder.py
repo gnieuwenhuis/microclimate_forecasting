@@ -175,3 +175,21 @@ def test_nwp_switch_off_empties_nwp_but_keeps_lead_hours() -> None:
     assert snap.nwp_features == {}
     assert snap.lead_hours == (1, 2, 3)
     assert len(snap.observation_features) == 2 * 8 * 1
+
+
+def test_no_train_serve_skew() -> None:
+    """A 'live' and a 'historical' NWP source returning identical FORECAST_FRAMEs, with
+    identical obs, must produce identical FeatureSnapshots — the skew guarantee at the
+    snapshot layer. (Fully-present obs so there are no NaNs to defeat == equality.)"""
+    config = make_config(horizon_hours=3, lag_hours=2)
+    frame = make_forecast_frame(_T0, _LEADS)
+
+    nwp_live = FakeNWP(frame)
+    nwp_hist = FakeNWP(frame)
+    obs_live = _obs_source_all_present()
+    obs_hist = _obs_source_all_present()
+
+    snap_live = build_snapshot(config, _T0, nwp_live, {"fake": obs_live})
+    snap_hist = build_snapshot(config, _T0, nwp_hist, {"fake": obs_hist})
+
+    assert snap_live == snap_hist
