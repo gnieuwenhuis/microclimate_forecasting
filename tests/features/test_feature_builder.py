@@ -233,3 +233,14 @@ def test_obs_off_emits_no_obs_or_adv_columns() -> None:
     df = build_features(snap, config)
     assert not [c for c in df.columns if c.startswith(("obs_", "adv_"))]
     assert "nwp_temp_c" in df.columns
+
+
+def test_nwp_off_emits_no_nwp_columns() -> None:
+    config = make_config(horizon_hours=5, lag_hours=3, nwp=False)
+    ts = [_T0 - timedelta(hours=k) for k in range(4)]
+    obs = FakeObs(frames={s: make_obs_frame(s, ts) for s in ("T1", "N1")})
+    nwp = FakeNWP(make_forecast_frame(_T0, list(range(1, 6))))
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+    df = build_features(snap, config)
+    assert not [c for c in df.columns if c.startswith("nwp_")]
+    assert "obs_T1_temp_c_lag0" in df.columns  # observations still present
