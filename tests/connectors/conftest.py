@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import xarray as xr
@@ -17,6 +17,7 @@ def build_hrdps_dataset(
     *,
     grid_size: tuple[int, int] = (2, 2),
     lead_hours: Sequence[int] = (0, 1, 2, 3),
+    var_map: Mapping[str, str] = VAR_MAP,
 ) -> xr.Dataset:
     """Build a small synthetic xr.Dataset that matches the nwp_core Dataset contract.
 
@@ -118,17 +119,17 @@ def build_hrdps_dataset(
     }
 
     # Map canonical name → per-variable numpy array, keyed by the shortName
-    # that VAR_MAP assigns.  Building the dict from VAR_MAP.values() ensures
+    # that var_map assigns.  Building the dict from var_map.values() ensures
     # this fixture never silently drifts from the production mapping.
     _data_by_short_name: dict[str, np.ndarray] = {
-        VAR_MAP["temp_c"]: t2m_data,
-        VAR_MAP["dewpoint_c"]: d2m_data,
-        VAR_MAP["surface_pressure_hpa"]: sp_data,
-        VAR_MAP["precip_mm"]: tp_data,
-        VAR_MAP["cloud_cover_fraction"]: tcc_data,
-        VAR_MAP["solar_radiation_wm2"]: dswrf_data,
-        VAR_MAP["wind_speed_ms"]: si10_data,
-        VAR_MAP["wind_dir_deg"]: wdir10_data,
+        var_map["temp_c"]: t2m_data,
+        var_map["dewpoint_c"]: d2m_data,
+        var_map["surface_pressure_hpa"]: sp_data,
+        var_map["precip_mm"]: tp_data,
+        var_map["cloud_cover_fraction"]: tcc_data,
+        var_map["solar_radiation_wm2"]: dswrf_data,
+        var_map["wind_speed_ms"]: si10_data,
+        var_map["wind_dir_deg"]: wdir10_data,
     }
 
     ds = xr.Dataset(
