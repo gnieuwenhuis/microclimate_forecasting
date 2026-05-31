@@ -1,7 +1,9 @@
 """Schema of the label-free feature matrix (L0). strict=False — feature columns vary.
 
-Produced by features.build_features from a FeatureSnapshot. Distinct from TRAINING_ROW
-(training_store.py), which is this plus labels; the two version independently.
+Produced by features.build_features from a FeatureSnapshot. Attaching labels
+(features.attach_labels) yields the LABELED FEATURE MATRIX the models train on. That is
+distinct from TRAINING_ROW (training_store.py), the persisted store schema, which per
+ADR-0012 holds raw snapshot values + labels and versions independently.
 """
 
 from __future__ import annotations

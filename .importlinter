@@ -22,9 +22,10 @@ modules =
     microclimate.evaluation
 
 [importlinter:contract:feature_builder_purity]
-name = build_features is pure — must not import connectors
+name = build_features and labeler are pure — must not import connectors
 type = forbidden
 source_modules =
     microclimate.features.feature_builder
+    microclimate.features.labeler
 forbidden_modules =
     microclimate.connectors
