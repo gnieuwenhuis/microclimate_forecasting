@@ -6,6 +6,10 @@ from collections.abc import Mapping
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
+# Single source of truth for the snapshot feature contract version. Bumped when the
+# set/meaning of feature keys changes. The training store stamps the same value.
+SNAPSHOT_SCHEMA_VERSION = "1.0.0"
+
 
 class FeatureSnapshot(BaseModel):
     """Inputs for one prediction at issue_time. Built only by features.build_snapshot."""

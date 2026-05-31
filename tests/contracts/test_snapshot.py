@@ -24,6 +24,13 @@ def test_valid_snapshot_constructs() -> None:
     assert snap.lead_hours == (1, 2, 3)
 
 
+def test_snapshot_schema_version_constant() -> None:
+    from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION
+
+    assert isinstance(SNAPSHOT_SCHEMA_VERSION, str)
+    assert SNAPSHOT_SCHEMA_VERSION  # non-empty
+
+
 def test_naive_datetime_rejected() -> None:
     with pytest.raises(ValidationError):
         FeatureSnapshot(
