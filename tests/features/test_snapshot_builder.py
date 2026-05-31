@@ -84,3 +84,46 @@ def test_static_elevation_nan_when_missing() -> None:
     snap = build_snapshot(config, _T0, nwp, {"fake": obs})
 
     assert math.isnan(snap.static_features["static_elevation_m"])
+
+
+def test_as_of_filters_future_obs() -> None:
+    config = make_config(horizon_hours=1, lag_hours=0)
+    nwp = FakeNWP(make_forecast_frame(_T0, [1]))
+    ts = [_T0 + timedelta(hours=1), _T0]
+    obs = FakeObs(frames={"T1": make_obs_frame("T1", ts), "N1": make_obs_frame("N1", ts)})
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+
+    assert snap.observation_features["obs_T1_temp_c_lag0"] == PINNED["temp_c"]
+    assert snap.observation_masks["obs_T1_temp_c_lag0"] is True
+
+
+def test_source_unavailable_degrades_only_that_network() -> None:
+    config = make_config(horizon_hours=1, lag_hours=0)
+    nwp = FakeNWP(make_forecast_frame(_T0, [1]))
+    obs = FakeObs(exc=SourceUnavailable("network down"))
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+
+    assert len(snap.observation_features) == 2 * 8 * 1
+    assert all(m is False for m in snap.observation_masks.values())
+    assert all(math.isnan(v) for v in snap.observation_features.values())
+    assert len(snap.nwp_features) == 8 * 1
+
+
+def test_empty_frame_degrades_to_masked() -> None:
+    config = make_config(horizon_hours=1, lag_hours=0)
+    nwp = FakeNWP(make_forecast_frame(_T0, [1]))
+    empty = make_obs_frame("T1", [])
+    obs = FakeObs(frames={"T1": empty, "N1": make_obs_frame("N1", [])})
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+
+    assert all(m is False for m in snap.observation_masks.values())
+
+
+def test_all_obs_fail_still_emits_nwp_only_snapshot() -> None:
+    config = make_config(horizon_hours=2, lag_hours=1)
+    nwp = FakeNWP(make_forecast_frame(_T0, [1, 2]))
+    obs = FakeObs(exc=SourceUnavailable("down"))
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+
+    assert len(snap.nwp_features) == 8 * 2
+    assert all(m is False for m in snap.observation_masks.values())
