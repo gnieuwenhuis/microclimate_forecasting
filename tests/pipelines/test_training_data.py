@@ -102,3 +102,15 @@ def test_chronological_split_by_issue_time() -> None:
     # no issue_time leaks across splits
     assert set(train["issue_time"]) & set(test["issue_time"]) == set()
     assert set(train["issue_time"]) & set(calib["issue_time"]) == set()
+
+
+def test_chronological_split_rejects_too_few_issue_times() -> None:
+    import pytest
+
+    from microclimate.pipelines.training_data import chronological_split
+
+    # n=4 with default calib_frac=0.2 -> int(4*0.2)=0 -> empty calib; must raise.
+    issue_times = [pd.Timestamp(_T0) + pd.Timedelta(hours=i) for i in range(4)]
+    df = pd.DataFrame({"issue_time": issue_times, "lead_hour": 1, "label_temp_c": 0.0})
+    with pytest.raises(ValueError, match="too few"):
+        chronological_split(df)

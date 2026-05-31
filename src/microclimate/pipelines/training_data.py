@@ -87,6 +87,14 @@ def chronological_split(
     n = len(times)
     n_train = int(n * train_frac)
     n_calib = int(n * calib_frac)
+    # Guard the degenerate small-n case: int() truncation can zero out a slice (e.g. n<5
+    # with the default calib_frac=0.2 → empty calib), which would later make the PoP
+    # calibrator fit on no rows. Fail loudly here instead.
+    if n_train == 0 or n_calib == 0 or n_train + n_calib >= n:
+        raise ValueError(
+            f"n={n} unique issue_times is too few to form non-empty train/calib/test "
+            f"splits at train_frac={train_frac}, calib_frac={calib_frac}"
+        )
     train_times = set(times[:n_train])
     calib_times = set(times[n_train : n_train + n_calib])
     test_times = set(times[n_train + n_calib :])
