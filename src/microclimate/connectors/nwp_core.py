@@ -12,7 +12,8 @@ HRDPS v1 unit assumptions (must be revisited if the upstream model changes):
     precip_mm              accumulated kg/m² from run-start → per-hour mm
                            (de-accumulate: diff vs previous hour; clamp ≥ 0)
     cloud_cover_fraction   %    → fraction (divide by 100; clamp to [0, 1])
-    solar_radiation_wm2    W/m² (instantaneous flux; pass-through)
+    solar_radiation_wm2    accumulated J/m² from run-start → mean W/m² over the hour
+                           (de-accumulate: diff vs previous hour, ÷3600 s; clamp ≥ 0)
     wind_speed_ms          m/s  (pass-through)
     wind_dir_deg           degrees 0–360 (pass-through)
 
@@ -47,6 +48,7 @@ from microclimate.contracts.forecast_frame import FORECAST_FRAME
 _KELVIN_OFFSET: float = 273.15
 _PA_TO_HPA: float = 100.0
 _PCT_TO_FRACTION: float = 100.0
+_SECONDS_PER_HOUR: float = 3600.0
 
 # Canonical variable names that every var_map must cover (one entry per
 # FORECAST_FRAME physical column).  Mirrors the _PHYS_VARS pattern used in
@@ -234,7 +236,6 @@ def dataset_to_forecast_frame(
         dew_k = _sample(dew_da, h, iy, ix)
         press_pa = _sample(press_da, h, iy, ix)
         cloud_pct = _sample(cloud_da, h, iy, ix)
-        solar = _sample(solar_da, h, iy, ix)
         wspd = _sample(wspd_da, h, iy, ix)
         wdir = _sample(wdir_da, h, iy, ix)
 
@@ -249,6 +250,12 @@ def dataset_to_forecast_frame(
         acc_prev = _sample(precip_da, h - 1, iy, ix)
         precip_mm = max(0.0, acc_h - acc_prev)
 
+        # -- Solar: HRDPS DSWRF is accumulated J/m² from run start. De-accumulate
+        #    like precip, then ÷Δt → mean W/m² over the hour. Clamp ≥ 0. (ADR-0014)
+        solar_acc_h = _sample(solar_da, h, iy, ix)
+        solar_acc_prev = _sample(solar_da, h - 1, iy, ix)
+        solar_wm2 = max(0.0, (solar_acc_h - solar_acc_prev) / _SECONDS_PER_HOUR)
+
         valid_time = pd.Timestamp(issue_utc + timedelta(hours=h))
 
         rows.append(
@@ -261,7 +268,7 @@ def dataset_to_forecast_frame(
                 "surface_pressure_hpa": press_hpa,
                 "precip_mm": precip_mm,
                 "cloud_cover_fraction": cloud_frac,
-                "solar_radiation_wm2": solar,
+                "solar_radiation_wm2": solar_wm2,
                 "wind_speed_ms": wspd,
                 "wind_dir_deg": wdir,
             }
