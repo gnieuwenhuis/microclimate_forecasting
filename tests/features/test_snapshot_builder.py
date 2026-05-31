@@ -195,3 +195,34 @@ def test_no_train_serve_skew() -> None:
     snap_hist = build_snapshot(config, _T0, nwp_hist, {"fake": obs_hist})
 
     assert snap_live == snap_hist
+
+
+def test_aware_non_utc_issue_time_normalized_to_utc() -> None:
+    """An aware non-UTC issue_time must produce the same snapshot as the equivalent UTC
+    instant — t0 temporal encodings and the UTC-keyed lag grid must not skew by timezone."""
+    from datetime import timezone
+
+    mst = timezone(timedelta(hours=-7))
+    # 2026-05-30 00:00 UTC == 2026-05-29 17:00 MST — the same physical instant.
+    issue_mst = datetime(2026, 5, 29, 17, 0, tzinfo=mst)
+    assert issue_mst.astimezone(UTC) == _T0
+
+    config = make_config(horizon_hours=3, lag_hours=2)
+    frame = make_forecast_frame(_T0, _LEADS)
+
+    snap_utc = build_snapshot(config, _T0, FakeNWP(frame), {"fake": _obs_source_all_present()})
+    snap_mst = build_snapshot(
+        config, issue_mst, FakeNWP(frame), {"fake": _obs_source_all_present()}
+    )
+
+    assert snap_mst.issue_time == _T0
+    assert snap_mst == snap_utc  # identical: temporal encodings + lag grid both UTC-correct
+
+
+def test_missing_connector_key_raises_clear_error() -> None:
+    """A connector_key referenced by config but absent from the observations map raises a
+    KeyError naming the missing key, not a bare lookup failure."""
+    config = make_config(horizon_hours=1, lag_hours=0)  # stations use connector_key "fake"
+    nwp = FakeNWP(make_forecast_frame(_T0, [1]))
+    with pytest.raises(KeyError, match="fake"):
+        build_snapshot(config, _T0, nwp, {"other_network": FakeObs()})

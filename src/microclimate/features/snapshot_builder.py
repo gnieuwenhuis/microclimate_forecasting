@@ -114,7 +114,12 @@ def build_snapshot(
     observations: Mapping[str, ObservationSource],
 ) -> FeatureSnapshot:
     """Build the one FeatureSnapshot for `issue_time` (see module docstring / ADR-0011)."""
-    issue_utc = issue_time if issue_time.tzinfo is not None else issue_time.replace(tzinfo=UTC)
+    # Normalise to UTC: naive datetimes are assumed UTC (the project's "UTC everywhere"
+    # convention); aware datetimes are converted, so an aware-but-non-UTC issue_time can't
+    # skew the t0 temporal encodings or the UTC-keyed lag-grid lookup.
+    issue_utc = (
+        issue_time.replace(tzinfo=UTC) if issue_time.tzinfo is None else issue_time.astimezone(UTC)
+    )
     lead_hours = tuple(range(1, config.horizon_hours + 1))
 
     # --- NWP (target cell only) — hard fail on connector errors (they propagate). ---
@@ -130,7 +135,14 @@ def build_snapshot(
         start = issue_utc - timedelta(hours=config.lag_hours)
         refs: list[StationRef] = [config.target, *config.neighbors]
         for ref in refs:
-            source = observations[ref.connector_key]
+            try:
+                source = observations[ref.connector_key]
+            except KeyError as exc:
+                raise KeyError(
+                    f"No observation source provided for connector_key "
+                    f"{ref.connector_key!r} (required by station {ref.station_id!r}). "
+                    f"Available: {sorted(observations)}."
+                ) from exc
             station_frame: pd.DataFrame | None
             try:
                 station_frame = source.fetch_historical(ref.station_id, start, issue_utc)
