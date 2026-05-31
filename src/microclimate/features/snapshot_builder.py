@@ -14,13 +14,16 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pandas as pd
 
 from microclimate.config.schema import DeploymentConfig
 from microclimate.connectors.base import NWPSource, ObservationSource
-from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
+from microclimate.contracts.snapshot import (
+    SNAPSHOT_SCHEMA_VERSION,  # noqa: F401  # type: ignore[reportUnusedImport]
+    FeatureSnapshot,
+)
 
 # Canonical physical variables, fixed order. Match FORECAST_FRAME / OBSERVATION_FRAME.
 _PHYSICAL_VARS: tuple[str, ...] = (
@@ -35,7 +38,7 @@ _PHYSICAL_VARS: tuple[str, ...] = (
 )
 
 
-def _temporal_features(issue_time: datetime) -> dict[str, float]:
+def _temporal_features(issue_time: datetime) -> dict[str, float]:  # type: ignore[reportUnusedFunction]
     """Cyclical encodings of t0 only (hour-of-day period 24, day-of-year period 365.25).
 
     Per-lead-hour temporal encodings are built downstream, not here.
@@ -50,7 +53,7 @@ def _temporal_features(issue_time: datetime) -> dict[str, float]:
     }
 
 
-def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:
+def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:  # type: ignore[reportUnusedFunction]
     """FORECAST_FRAME (one row per lead hour) → {nwp_{var}_h{lead}: value}.
 
     Target-cell forecast values only; no masks (NWP is complete-or-fail).
@@ -61,6 +64,50 @@ def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:
         for var in _PHYSICAL_VARS:
             out[f"nwp_{var}_h{lead}"] = float(row[var])  # type: ignore[reportUnknownArgumentType]
     return out
+
+
+def _align_obs_to_lag_grid(  # type: ignore[reportUnusedFunction]
+    frame: pd.DataFrame | None,
+    station_id: str,
+    issue_time: datetime,
+    lag_hours: int,
+) -> tuple[dict[str, float], dict[str, bool]]:
+    """Align one station's OBSERVATION_FRAME onto the fixed hourly lag grid.
+
+    Grid: lag0 = issue_time, lag1 = issue_time-1h, … lag{lag_hours}. Rows are matched by
+    exact UTC-hour equality. A slot is absent (value NaN, mask False) when no row exists at
+    that hour, the value is null, or the row's <var>_present is False. A None/empty frame
+    (degraded source) yields an all-absent grid. issue_time is NOT floored: an off-hour t0
+    simply matches no rows.
+
+    Defensive as-of filter: rows with timestamp > issue_time are dropped before matching.
+    """
+    cutoff = pd.Timestamp(issue_time)
+    row_by_ts: dict[pd.Timestamp, int] = {}
+    in_window: pd.DataFrame | None = None
+    if frame is not None and len(frame) > 0:
+        in_window = frame[frame["timestamp"] <= cutoff].reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
+        for i, ts in enumerate(in_window["timestamp"]):  # type: ignore[reportUnknownVariableType]
+            row_by_ts[pd.Timestamp(ts)] = i  # type: ignore[reportUnknownArgumentType]
+
+    features: dict[str, float] = {}
+    masks: dict[str, bool] = {}
+    for k in range(lag_hours + 1):
+        slot_ts = cutoff - pd.Timedelta(hours=k)
+        row_idx = row_by_ts.get(slot_ts)
+        for var in _PHYSICAL_VARS:
+            key = f"obs_{station_id}_{var}_lag{k}"
+            value = float("nan")
+            present = False
+            if row_idx is not None and in_window is not None:
+                is_present = bool(in_window[f"{var}_present"].iloc[row_idx])  # type: ignore[reportUnknownArgumentType]
+                raw = in_window[var].iloc[row_idx]  # type: ignore[reportUnknownVariableType]
+                if is_present and pd.notna(raw):  # type: ignore[reportUnknownArgumentType]
+                    value = float(raw)  # type: ignore[reportUnknownArgumentType]
+                    present = True
+            features[key] = value
+            masks[key] = present
+    return features, masks
 
 
 def build_snapshot(
