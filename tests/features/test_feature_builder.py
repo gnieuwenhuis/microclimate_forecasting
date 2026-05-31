@@ -244,3 +244,28 @@ def test_nwp_off_emits_no_nwp_columns() -> None:
     df = build_features(snap, config)
     assert not [c for c in df.columns if c.startswith("nwp_")]
     assert "obs_T1_temp_c_lag0" in df.columns  # observations still present
+
+
+def test_rejects_config_deployment_mismatch() -> None:
+    # Row is stamped with the snapshot deployment but columns come from config — they must agree.
+    snap, config = _snapshot()
+    mismatched = config.model_copy(update={"deployment_id": "elsewhere"})
+    with pytest.raises(ValueError, match="deployment_id"):
+        build_features(snap, mismatched)
+
+
+def test_output_has_no_label_columns() -> None:
+    # Label-free is a producer guarantee: build_features never emits label_* columns
+    # (FEATURE_ROW is strict=False to allow dynamic feature columns, like TRAINING_ROW).
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    assert not [c for c in df.columns if c.startswith("label")]
+
+
+def test_config_rejects_horizon_over_48() -> None:
+    from pydantic import ValidationError
+
+    # FEATURE_ROW / TRAINING_ROW cap lead_hour at 48; horizon is capped at construction so
+    # the bound holds by construction (HRDPS lead-time ceiling, ADR-0007).
+    with pytest.raises(ValidationError):
+        make_config(horizon_hours=49)

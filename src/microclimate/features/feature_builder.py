@@ -37,6 +37,14 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
             f"{SNAPSHOT_SCHEMA_VERSION!r}; refusing to build features from an "
             "incompatible snapshot."
         )
+    # The row is stamped with the snapshot's deployment_id, but observation/advection/static
+    # columns are derived from `config` (neighbor IDs, coordinates). A config from another
+    # deployment would silently mix the two, so require them to agree.
+    if config.deployment_id != snapshot.deployment_id:
+        raise ValueError(
+            f"config.deployment_id {config.deployment_id!r} != snapshot.deployment_id "
+            f"{snapshot.deployment_id!r}; refusing to build features from a mismatched config."
+        )
 
     leads = list(snapshot.lead_hours)
     n = len(leads)

@@ -67,7 +67,7 @@ class DeploymentConfig(BaseModel):
     neighbors: list[StationRef]
     enabled_sources: list[str]
     nwp: NwpConfig
-    horizon_hours: int = 48
+    horizon_hours: int = Field(default=48, ge=1, le=48)  # HRDPS lead-time ceiling (ADR-0007)
     lag_hours: int = Field(ge=0)
     feature_groups: FeatureGroupSwitches
     label: LabelConfig
