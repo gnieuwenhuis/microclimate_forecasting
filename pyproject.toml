@@ -8,10 +8,12 @@ dependencies = [
   "pandera[pandas]>=0.20",
   "pandas>=2.2",
   "lightgbm>=4.3",
+  "scikit-learn>=1.4",
   "pyyaml>=6.0",
   "requests>=2.31",
   "xarray>=2026.4.0",
   "cfgrib>=0.9.15.1",
+  "pyarrow>=16.0",
 ]
 
 [project.scripts]
@@ -34,6 +36,11 @@ dev = [
   "pandas-stubs>=2.2",
   "types-PyYAML>=6.0",
   "types-requests",
+]
+notebook = [
+  "jupyter>=1.0",
+  "jupytext>=1.16",
+  "matplotlib>=3.8",
 ]
 
 [tool.ruff]

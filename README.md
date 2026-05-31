@@ -26,8 +26,17 @@ single as-of feature path shared by training and inference (ADR-0011) — and
 `features.build_features` — the read-time transform from a `FeatureSnapshot` to the feature
 matrix (derived features + explode-to-per-lead-hour rows, ADR-0012).
 
-**Not yet implemented** (currently stubs): the temp/PoP models, evaluation + publish gate,
-forecast-JSON / registry publication, and the inference/training pipeline CLIs.
+Additionally implemented: `features.attach_labels` (the pure label-attachment step →
+labeled feature matrix), `pipelines.training_data` (training-data assembly + local Parquet
+cache + chronological split — the shared seam, ADR-0013), the two **LightGBM model
+wrappers** (`models.TemperatureRegressor` and `models.PrecipOccurrenceClassifier` with
+isotonic calibration, row-based `predict`), `evaluation.metrics` (per-lead skill vs the
+raw-HRDPS baseline + PoP reliability), and a thin local **model-dev notebook**
+(`notebooks/model_dev.py`).
+
+**Not yet implemented** (currently stubs): the publish gate, forecast-JSON / registry
+publication, the inference/training pipeline orchestration CLIs, and the private
+training-store read/write path (local dev backfills from CaSPAr historical instead).
 
 ## Develop
 

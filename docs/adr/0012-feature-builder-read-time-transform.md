@@ -41,6 +41,7 @@ canonicalization (units, variable order), already done upstream.
   forbidden contract.
 - A label-attachment step (join observed labels onto the feature matrix to form `TRAINING_ROW`)
   remains a separate downstream work item.
-- `model.predict` needs `config` to build rows; the recommended resolution (deferred to the
-  models work) is for the pipeline to own the `build_features` call and pass rows to both
-  `fit` and `predict`.
+- **Resolved (ADR-0013):** `model.predict` is row-based and the pipeline owns the
+  `build_features` call, passing rows to both `fit` and `predict`. A label-attachment step
+  (`features.attach_labels`, pure) and a training-data assembler (`pipelines.training_data`)
+  now produce the labeled feature matrix; the persisted `TRAINING_ROW` store remains deferred.
