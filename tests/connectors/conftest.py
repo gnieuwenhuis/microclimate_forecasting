@@ -8,7 +8,19 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 import xarray as xr
 
-from microclimate.connectors.sources.hrdps_datamart import HRDPS_VAR_MAP as VAR_MAP  # noqa: F401
+# Identity var_map: the connector produces canonical-named dataset variables and
+# hands nwp_core an identity map (no ECMWF-shortName indirection).  The synthetic
+# fixture mirrors that — its data vars are named by these canonical keys.
+VAR_MAP: dict[str, str] = {
+    "temp_c": "temp_c",
+    "dewpoint_c": "dewpoint_c",
+    "surface_pressure_hpa": "surface_pressure_hpa",
+    "precip_mm": "precip_mm",
+    "cloud_cover_fraction": "cloud_cover_fraction",
+    "solar_radiation_wm2": "solar_radiation_wm2",
+    "wind_speed_ms": "wind_speed_ms",
+    "wind_dir_deg": "wind_dir_deg",
+}
 
 _FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures" / "envcanada"
 
@@ -35,16 +47,20 @@ def build_hrdps_dataset(
         Cell (iy=1, ix=0): lat=52.0, lon=-114.0
         Cell (iy=1, ix=1): lat=52.0, lon=-113.0  ← alternate target
 
+    Data variables are named by their CANONICAL column names (the connector
+    produces canonical-named vars and hands nwp_core an identity map).
+
     The target cell (0,0) has KNOWN values so unit-conversion tests are predictable:
-        t2m   = 288.15 K  → 15.0 °C after conversion
-        d2m   = 278.15 K  → 5.0 °C after conversion
-        sp    = 90000 Pa  → 900.0 hPa after conversion
-        tp    = [0.0, 0.5, 2.0, 2.0, …]  accumulated kg/m²
-                → per-hour at leads [1,2,3]: [0.5, 1.5, 0.0]
-        tcc   = 50 %      → 0.5 after conversion
-        dswrf = 300 W/m²  → 300.0 (pass-through)
-        si10  = 5.0 m/s   → 5.0 (pass-through)
-        wdir10 = 270 deg  → 270.0 (pass-through)
+        temp_c                = 288.15 K  → 15.0 °C after conversion
+        dewpoint_c            = 278.15 K  → 5.0 °C after conversion
+        surface_pressure_hpa  = 90000 Pa  → 900.0 hPa after conversion
+        precip_mm  (accum)    = [0.0, 0.5, 2.0, 2.0, …]  accumulated kg/m²
+                                → per-hour at leads [1,2,3]: [0.5, 1.5, 0.0]
+        cloud_cover_fraction  = 50 %      → 0.5 after conversion
+        solar_radiation_wm2 (accum J/m²) = [0.0, 3_600_000, 7_200_000, 7_200_000]
+                                → per-hour mean flux at leads [1,2,3]: [1000.0, 1000.0, 0.0] W/m²
+        wind_speed_ms         = 5.0 m/s   → 5.0 (pass-through)
+        wind_dir_deg          = 270 deg   → 270.0 (pass-through)
 
     Alternate cell (1,1) has distinct values (e.g. temp=293.15 K → 20.0 °C) so a
     wrong-cell selection causes test failures.
@@ -103,8 +119,21 @@ def build_hrdps_dataset(
     # Cloud cover (%): 50 @ target, 75 @ others
     tcc_data = _fill(50.0, 75.0)
 
-    # Solar radiation (W/m²): 300 @ target, 400 @ others
-    dswrf_data = _fill(300.0, 400.0)
+    # Accumulated downward shortwave (J/m²): run-total at the target cell so it
+    # de-accumulates (÷3600) to a known per-hour mean flux.  The standard
+    # first-four values are pinned: [0.0, 3_600_000, 7_200_000, 7_200_000]
+    # → per-hour mean flux at leads [1,2,3]: [1000.0, 1000.0, 0.0] W/m².  Other
+    # cells get distinct accumulated values so wrong-cell selection fails.
+    solar_pinned = [0.0, 3_600_000.0, 7_200_000.0, 7_200_000.0]
+    dswrf_data = np.full((n_lh, ny, nx), 1_000_000.0, dtype=np.float64)
+    for lh_i in range(n_lh):
+        dswrf_data[lh_i, 0, 0] = (
+            solar_pinned[lh_i] if lh_i < len(solar_pinned) else float(lh_i) * 3_600_000.0
+        )
+    # Distinct accumulated ramps for the other corner cells.
+    dswrf_data[:, 0, 1] = [float(i) * 1_800_000.0 for i in range(n_lh)]
+    dswrf_data[:, 1, 0] = [float(i) * 900_000.0 for i in range(n_lh)]
+    dswrf_data[:, 1, 1] = [float(i) * 450_000.0 for i in range(n_lh)]
 
     # Wind speed (m/s): 5.0 @ target, 8.0 @ others
     si10_data = _fill(5.0, 8.0)
@@ -118,10 +147,10 @@ def build_hrdps_dataset(
         "longitude": xr.DataArray(lon_data, dims=dims_yx),
     }
 
-    # Map canonical name → per-variable numpy array, keyed by the shortName
-    # that var_map assigns.  Building the dict from var_map.values() ensures
-    # this fixture never silently drifts from the production mapping.
-    _data_by_short_name: dict[str, np.ndarray] = {
+    # Map each per-variable numpy array to the dataset-variable name that
+    # var_map assigns (the identity map → canonical names).  Building the dict
+    # from var_map ensures this fixture never silently drifts from the mapping.
+    _data_by_var_name: dict[str, np.ndarray] = {
         var_map["temp_c"]: t2m_data,
         var_map["dewpoint_c"]: d2m_data,
         var_map["surface_pressure_hpa"]: sp_data,
@@ -133,7 +162,7 @@ def build_hrdps_dataset(
     }
 
     ds = xr.Dataset(
-        {k: xr.DataArray(v, dims=dims_lh_yx) for k, v in _data_by_short_name.items()},
+        {k: xr.DataArray(v, dims=dims_lh_yx) for k, v in _data_by_var_name.items()},
         coords=coords,
     )
     return ds

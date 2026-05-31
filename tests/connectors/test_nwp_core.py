@@ -66,8 +66,8 @@ def test_schema_conformance_and_canonical_values() -> None:
     assert row1["wind_dir_deg"] == pytest.approx(270.0)  # type: ignore[reportUnknownMemberType]
     # wind speed: 5.0 m/s (pass-through)
     assert row1["wind_speed_ms"] == pytest.approx(5.0)  # type: ignore[reportUnknownMemberType]
-    # solar: fixture has constant 300 J/m² at all lead hours → de-accumulates to 0.0 W/m²
-    assert row1["solar_radiation_wm2"] == pytest.approx(0.0)  # type: ignore[reportUnknownMemberType]
+    # solar: fixture accum J/m² [0.0, 3_600_000, …] → lead 1 = (3.6e6-0)/3600 = 1000.0 W/m²
+    assert row1["solar_radiation_wm2"] == pytest.approx(1000.0)  # type: ignore[reportUnknownMemberType]
 
     # valid_time = issue_time + lead_hour
     for _row, lh in zip([row1, row2, row3], [1, 2, 3], strict=True):

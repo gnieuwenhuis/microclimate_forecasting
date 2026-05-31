@@ -16,18 +16,15 @@ Injectable opener:
   calls ``HrdpsDatamartSource()`` with no args, so the default MUST work
   argument-free.
 
-IMPORTANT — seam caveats (unverified against live data):
-  * The Datamart GRIB2 URL pattern used in ``_open_latest_run`` is a best-effort
-    reconstruction from public MSC documentation.  The exact path components
-    (sub-directory names, filename conventions, product codes) MUST be verified
-    against a live Datamart mirror before relying on the default seam in
-    production.
-  * The GRIB shortNames assumed in ``HRDPS_VAR_MAP`` match the synthetic dataset
-    in the test fixtures (``build_hrdps_dataset``).  Whether real HRDPS GRIB2
-    files encode these variables under the same shortNames (vs GRIB2 paramId /
-    eccodes table) has NOT been verified against live data.
-  * cfgrib's ``filter_by_keys`` arguments used in ``_open_latest_run`` may need
-    tuning for the actual file layout of Datamart HRDPS continental products.
+Live layout (verified 2026-05-31, real Datamart run):
+  * URL is date-partitioned:
+      {BASE}/{YYYYMMDD}/WXO-DD/model_hrdps/continental/2.5km/{HH}/{hhh}/
+        {YYYYMMDD}T{HH}Z_MSC_HRDPS_{VAR}_{LEVEL}_RLatLon0.0225_PT{hhh}H.grib2
+  * The 8 canonical columns map to MSC ``(VAR, LEVEL)`` codes (``HRDPS_VAR_MAP``).
+  * Each single-variable file decodes to exactly ONE data var; cfgrib names some
+    ``unknown`` (e.g. APCP/TCDC), so ``_open_latest_run`` selects the sole data
+    var rather than indexing by shortName, names it by the canonical key, and
+    hands nwp_core an identity var_map.
 """
 
 from __future__ import annotations
@@ -49,29 +46,25 @@ from microclimate.connectors.registry import register_source
 # Module-level constants
 # ---------------------------------------------------------------------------
 
-# Datamart base URL for HRDPS continental 2.5 km products.
-# NOTE: This URL pattern is unverified — see module docstring.
-_DATAMART_BASE: str = "https://dd.weather.gc.ca/model_hrdps/continental/2.5km"
+# MSC Datamart root. The HRDPS continental path is date-partitioned (verified 2026-05-31).
+_DATAMART_BASE: str = "https://dd.weather.gc.ca"
 
-# Mapping: canonical column name → HRDPS GRIB shortName.
-# Exported as a public name so tests can import it directly and stay in sync.
-# NOTE: Real HRDPS GRIB shortNames are unverified — see module docstring.
-HRDPS_VAR_MAP: dict[str, str] = {
-    "temp_c": "t2m",
-    "dewpoint_c": "d2m",
-    "surface_pressure_hpa": "sp",
-    "precip_mm": "tp",
-    "cloud_cover_fraction": "tcc",
-    "solar_radiation_wm2": "dswrf",
-    "wind_speed_ms": "si10",
-    "wind_dir_deg": "wdir10",
+# canonical column → (MSC variable code, level tag) used to build the Datamart filename.
+# Verified against live HRDPS continental 2.5 km GRIB2 (run 2026-05-31 18Z).
+HRDPS_VAR_MAP: dict[str, tuple[str, str]] = {
+    "temp_c": ("TMP", "AGL-2m"),
+    "dewpoint_c": ("DPT", "AGL-2m"),
+    "surface_pressure_hpa": ("PRES", "Sfc"),
+    "precip_mm": ("APCP", "Sfc"),
+    "cloud_cover_fraction": ("TCDC", "Sfc"),
+    "solar_radiation_wm2": ("DSWRF", "Sfc"),
+    "wind_speed_ms": ("WIND", "AGL-10m"),
+    "wind_dir_deg": ("WDIR", "AGL-10m"),
 }
 
-# Private alias retained for readability within this module.
-_HRDPS_VAR_MAP: dict[str, str] = HRDPS_VAR_MAP
-
-# GRIB shortNames that cfgrib needs to load from individual GRIB2 files.
-_GRIB_SHORT_NAMES: tuple[str, ...] = tuple(_HRDPS_VAR_MAP.values())
+# The connector names dataset variables by their canonical names, so the var_map handed
+# to nwp_core is the identity map (no ECMWF-shortName indirection).
+_IDENTITY_VAR_MAP: dict[str, str] = {canon: canon for canon in HRDPS_VAR_MAP}
 
 
 # ---------------------------------------------------------------------------
@@ -79,27 +72,18 @@ _GRIB_SHORT_NAMES: tuple[str, ...] = tuple(_HRDPS_VAR_MAP.values())
 # ---------------------------------------------------------------------------
 
 
-def _build_datamart_url(issue_time: datetime, lead_hour: int, short_name: str) -> str:
-    """Build a best-effort MSC Datamart HRDPS continental GRIB2 URL.
+def _build_datamart_url(issue_time: datetime, lead_hour: int, var: str, level: str) -> str:
+    """Build the (verified) MSC Datamart HRDPS continental 2.5 km GRIB2 URL.
 
-    IMPORTANT: This URL pattern is unverified against live Datamart data.
-    The actual path structure, filename convention, and product codes must be
-    confirmed before using in production.  See module docstring.
-
-    Args:
-        issue_time: UTC model run initialisation time.
-        lead_hour:  Forecast lead hour (0-based from run start).
-        short_name: GRIB shortName for the variable (e.g. ``"t2m"``).
-
-    Returns:
-        Best-effort absolute URL string.
+    Layout (verified 2026-05-31):
+      {BASE}/{YYYYMMDD}/WXO-DD/model_hrdps/continental/2.5km/{HH}/{hhh}/
+        {YYYYMMDD}T{HH}Z_MSC_HRDPS_{VAR}_{LEVEL}_RLatLon0.0225_PT{hhh}H.grib2
     """
-    run_str = issue_time.strftime("%Y%m%dT%HZ")
-    hh = f"{lead_hour:03d}"
-    # Best-effort filename pattern:
-    # CMC_hrdps_continental_<shortName>_SFC_0_ps2.5km_YYYYMMDDTHHUTZ_Phhh.grib2
-    filename = f"CMC_hrdps_continental_{short_name}_SFC_0_ps2.5km_{run_str}_P{hh}.grib2"
-    return f"{_DATAMART_BASE}/{run_str}/{hh}/{filename}"
+    date = issue_time.strftime("%Y%m%d")
+    hh = issue_time.strftime("%H")
+    hhh = f"{lead_hour:03d}"
+    fn = f"{date}T{hh}Z_MSC_HRDPS_{var}_{level}_RLatLon0.0225_PT{hhh}H.grib2"
+    return f"{_DATAMART_BASE}/{date}/WXO-DD/model_hrdps/continental/2.5km/{hh}/{hhh}/{fn}"
 
 
 def _open_latest_run(
@@ -117,10 +101,9 @@ def _open_latest_run(
         - 1-D integer ``lead_hour`` coordinate (ascending, includes the hour
           before the smallest requested hour for precip de-accumulation).
         - 2-D ``latitude`` / ``longitude`` coordinates over dims (y, x).
-        - Data variables named by HRDPS GRIB shortNames (see ``HRDPS_VAR_MAP``).
-
-    IMPORTANT: URL patterns, cfgrib filter_by_keys arguments, and shortName
-    mappings are unverified against live Datamart data.  See module docstring.
+        - Data variables named by their CANONICAL column names (see
+          ``HRDPS_VAR_MAP`` keys); each single-variable file's sole data var is
+          selected and renamed to its canonical key.
 
     Args:
         issue_time:  UTC model run initialisation time.
@@ -148,54 +131,47 @@ def _open_latest_run(
     min_lh = min(lead_hours)
     all_lead_hours = sorted({max(0, min_lh - 1), *lead_hours})
 
-    # Download one GRIB2 file per (lead_hour, shortName) combination.
-    # Each shortName lives in its own Datamart file.
-    # Results collected as {lead_hour: {short_name: xr.DataArray}}.
+    # Download one GRIB2 file per (lead_hour, canonical var) combination.
+    # Each MSC single-variable file lives at its own Datamart URL.
+    # Results collected as {lead_hour: {canonical_var: xr.DataArray}}.
     # All temp files are written inside a single TemporaryDirectory that is
     # automatically removed (along with its contents) when the context exits.
     # After combining into the final Dataset we call .load() to materialise the
     # data into memory BEFORE the directory is deleted — cfgrib reads lazily.
     with tempfile.TemporaryDirectory() as tmpdir:
+        # {lead_hour: {canonical_var: DataArray}}
         per_lh: dict[int, dict[str, xr.DataArray]] = {}
-
         for lh in all_lead_hours:
             per_lh[lh] = {}
-            for short_name in _GRIB_SHORT_NAMES:
-                url = _build_datamart_url(issue_time, lh, short_name)
-                # SourceUnavailable from http_get_bytes propagates unchanged.
-                data_bytes = http_get_bytes(url)
-
-                # Write bytes to a temp file so cfgrib can read it.
-                tmp_path = f"{tmpdir}/{lh}_{short_name}.grib2"
+            for canon, (var, level) in HRDPS_VAR_MAP.items():
+                url = _build_datamart_url(issue_time, lh, var, level)
+                data_bytes = http_get_bytes(url)  # SourceUnavailable propagates
+                tmp_path = f"{tmpdir}/{lh}_{canon}.grib2"
                 try:
                     with open(tmp_path, "wb") as fh:
                         fh.write(data_bytes)
                 except OSError as exc:
                     raise SourceUnavailable(
-                        f"Disk I/O error writing temp GRIB2 for shortName={short_name!r}, "
-                        f"lead_hour={lh}: {exc}"
+                        f"Disk I/O error writing temp GRIB2 for {canon!r}, lead_hour={lh}: {exc}"
                     ) from exc
-
-                # Decode with cfgrib — failures here mean the run is bad/absent.
                 try:
                     ds_single: xr.Dataset = cfgrib.open_dataset(  # type: ignore[reportUnknownMemberType]
-                        tmp_path,
-                        filter_by_keys={"shortName": short_name},
-                        indexpath="",  # avoid creating .idx sidecar files
+                        tmp_path, indexpath=""
                     )
                 except Exception as exc:
                     raise ForecastUnavailable(
-                        f"Failed to decode GRIB2 for shortName={short_name!r}, "
+                        f"Failed to decode GRIB2 for {canon!r} ({var}/{level}), "
                         f"lead_hour={lh}: {exc}"
                     ) from exc
-
-                # Extract the DataArray for this variable.
-                if short_name not in ds_single:
+                # Each MSC single-variable file holds exactly one data var; cfgrib may name
+                # it 'unknown' (e.g. APCP/TCDC) so select by sole-var, not by name.
+                names = list(ds_single.data_vars)
+                if len(names) != 1:
                     raise ForecastUnavailable(
-                        f"Variable {short_name!r} not found in GRIB2 at lead_hour={lh}. "
-                        f"Available: {list(ds_single.data_vars)}"
+                        f"Expected exactly one data variable in {canon!r} ({var}/{level}) "
+                        f"file at lead_hour={lh}, got {names}."
                     )
-                per_lh[lh][short_name] = ds_single[short_name]
+                per_lh[lh][canon] = ds_single[names[0]]
 
         # Combine into a single Dataset with a lead_hour dimension.
         # Extract spatial shape from the first DataArray.
@@ -203,20 +179,17 @@ def _open_latest_run(
         spatial_dims: tuple[str, ...] = tuple(str(d) for d in first_da.dims)  # type: ignore[reportUnknownMemberType]
         spatial_shape: tuple[int, ...] = tuple(int(s) for s in first_da.shape)  # type: ignore[reportUnknownMemberType]
 
-        # Build combined arrays of shape (lead_hour, y, x).
+        # Build combined arrays of shape (lead_hour, y, x), named by canonical key.
         data_vars: dict[str, xr.DataArray] = {}
-        for short_name in _GRIB_SHORT_NAMES:
+        for canon in HRDPS_VAR_MAP:
             stacked: np.ndarray = np.stack(  # type: ignore[reportUnknownMemberType]
-                [per_lh[lh][short_name].values for lh in all_lead_hours],  # type: ignore[reportUnknownMemberType]
+                [per_lh[lh][canon].values for lh in all_lead_hours],  # type: ignore[reportUnknownMemberType]
                 axis=0,
             )
-            data_vars[short_name] = xr.DataArray(
-                stacked,
-                dims=("lead_hour", *spatial_dims),
-            )
+            data_vars[canon] = xr.DataArray(stacked, dims=("lead_hour", *spatial_dims))
 
         # Extract latitude/longitude from the first DataArray's coordinates.
-        first_var_da = per_lh[all_lead_hours[0]][_GRIB_SHORT_NAMES[0]]
+        first_var_da = per_lh[all_lead_hours[0]][next(iter(HRDPS_VAR_MAP))]
         lat_vals: xr.DataArray
         lon_vals: xr.DataArray
         if "latitude" in first_var_da.coords and "longitude" in first_var_da.coords:  # type: ignore[reportUnknownMemberType]
@@ -324,7 +297,7 @@ class HrdpsDatamartSource(NWPSource):
         try:
             return dataset_to_forecast_frame(
                 ds,
-                _HRDPS_VAR_MAP,
+                _IDENTITY_VAR_MAP,
                 issue_time=issue_utc,
                 lat=lat,
                 lon=lon,

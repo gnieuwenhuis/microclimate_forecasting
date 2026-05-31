@@ -110,6 +110,17 @@ def test_happy_path_pinned_precip_de_accumulation() -> None:
     assert float(df.loc[df["lead_hour"] == 3, "precip_mm"].iloc[0]) == pytest.approx(0.0, abs=1e-6)  # type: ignore[reportUnknownMemberType]
 
 
+def test_happy_path_pinned_solar_de_accumulation() -> None:
+    """Solar de-accumulation: accum J/m² [0, 3.6e6, 7.2e6, 7.2e6] → W/m² [1000, 1000, 0]."""
+    source = _make_source()
+    df = source.fetch_forecast(
+        datetime(2026, 5, 31, 0, tzinfo=UTC), lat=51.0, lon=-114.0, lead_hours=[1, 2, 3]
+    ).set_index("lead_hour")
+    assert df.loc[1, "solar_radiation_wm2"] == 1000.0
+    assert df.loc[2, "solar_radiation_wm2"] == 1000.0
+    assert df.loc[3, "solar_radiation_wm2"] == 0.0
+
+
 def test_happy_path_pinned_cloud_cover_fraction() -> None:
     """target cell has tcc=50 % → 0.5 after conversion."""
     source = _make_source()
