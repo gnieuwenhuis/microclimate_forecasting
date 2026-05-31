@@ -50,6 +50,19 @@ def _temporal_features(issue_time: datetime) -> dict[str, float]:
     }
 
 
+def _flatten_forecast(frame: pd.DataFrame) -> dict[str, float]:
+    """FORECAST_FRAME (one row per lead hour) → {nwp_{var}_h{lead}: value}.
+
+    Target-cell forecast values only; no masks (NWP is complete-or-fail).
+    """
+    out: dict[str, float] = {}
+    for _, row in frame.iterrows():  # type: ignore[reportUnknownVariableType]
+        lead = int(row["lead_hour"])  # type: ignore[reportUnknownArgumentType]
+        for var in _PHYSICAL_VARS:
+            out[f"nwp_{var}_h{lead}"] = float(row[var])  # type: ignore[reportUnknownArgumentType]
+    return out
+
+
 def build_snapshot(
     config: DeploymentConfig,
     issue_time: datetime,
