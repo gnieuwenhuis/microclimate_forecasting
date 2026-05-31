@@ -49,3 +49,16 @@ If the concept you need isn't in the glossary yet, that's a signal — either yo
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
 > _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+
+## Keep decisions and language current
+
+`docs/adr/` and `CONTEXT.md` are the **source of truth** for architecture and domain
+vocabulary — they describe the project as it is *now*, not just how it started. As the project
+matures:
+
+- When you **make, change, or supersede an architectural decision**, add or update an ADR in
+  the same change — don't let the code outrun the documented decision.
+- When you **introduce or rename a domain concept**, update `CONTEXT.md` so the glossary stays
+  authoritative.
+
+Use `/grill-with-docs` to produce or revise these when a decision or term is being settled.
