@@ -52,11 +52,11 @@ neighbors:
     lon: -112.05
     elevation_m: 1050
 
-enabled_sources: [hrdps_geomet, hrdps_caspar, envcanada]
+enabled_sources: [hrdps_datamart, hrdps_caspar, envcanada]
 
 nwp:
   product: hrdps
-  live_connector: hrdps_geomet             # GeoMet/Datamart — inference
+  live_connector: hrdps_datamart           # MSC Datamart GRIB2 — inference
   historical_connector: hrdps_caspar       # CaSPAr archive — training seed
   sampling: nearest_grid_cell              # sample HRDPS at the target lat/lon
   # The CaSPAr and GeoMet variable/grid spec MUST match (ADR-0007 / CONTEXT "one HRDPS spec").

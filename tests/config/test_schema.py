@@ -25,10 +25,10 @@ def _raw() -> dict[str, object]:
                 "elevation_m": None,
             }
         ],
-        "enabled_sources": ["hrdps_geomet", "hrdps_caspar", "envcanada", "acis"],
+        "enabled_sources": ["hrdps_datamart", "hrdps_caspar", "envcanada", "acis"],
         "nwp": {
             "product": "hrdps",
-            "live_connector": "hrdps_geomet",
+            "live_connector": "hrdps_datamart",
             "historical_connector": "hrdps_caspar",
             "sampling": "nearest_grid_cell",
         },
