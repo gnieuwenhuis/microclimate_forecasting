@@ -22,7 +22,9 @@ from microclimate.connectors.base import (
     NWPSource,
     ObservationSource,
 )
-from microclimate.features.snapshot_builder import _PHYSICAL_VARS  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
+from microclimate.features.snapshot_builder import (
+    _PHYSICAL_VARS,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
+)
 
 PHYS = _PHYSICAL_VARS
 
@@ -169,5 +171,3 @@ def make_config(
         ),
         output=OutputConfig(forecast_json="x.json"),
     )
-
-

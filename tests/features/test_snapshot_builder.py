@@ -12,7 +12,7 @@ from microclimate.connectors.base import ForecastUnavailable, SourceUnavailable,
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
 from microclimate.features.snapshot_builder import build_snapshot
 
-from .conftest import FakeNWP, FakeObs, PINNED, make_config, make_forecast_frame, make_obs_frame
+from .conftest import PINNED, FakeNWP, FakeObs, make_config, make_forecast_frame, make_obs_frame
 
 _T0 = datetime(2026, 5, 30, 0, 0, tzinfo=UTC)
 _LEADS = [1, 2, 3]
