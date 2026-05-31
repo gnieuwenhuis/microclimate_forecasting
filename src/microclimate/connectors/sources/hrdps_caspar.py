@@ -123,7 +123,7 @@ def _resolve_existing_archive(root: Path, issue_time: datetime) -> Path:
     """
     for ext in _SUPPORTED_EXTS:
         candidate = _archive_path(root, issue_time, ext)
-        if candidate.exists():
+        if candidate.is_file():
             return candidate
     stem = issue_time.strftime("%Y%m%d%H")
     raise ForecastUnavailable(
@@ -174,32 +174,36 @@ def _open_caspar_file(path: Path) -> xr.Dataset:
             variables, or cannot be normalised to the Dataset contract.
     """
     ext = path.suffix.lower()
-    try:
-        if ext == ".nc":
+    if ext == ".nc":
+        try:
             ds: xr.Dataset = xr.open_dataset(path)  # type: ignore[reportUnknownMemberType]
-        else:
-            # GRIB2/GRIB: import cfgrib lazily — eccodes binary may be absent.
-            try:
-                import cfgrib  # type: ignore[reportMissingTypeStubs]
-            except ImportError as exc:
-                raise SourceUnavailable(
-                    "cfgrib is not importable (eccodes binary unavailable)"
-                ) from exc
-            try:
-                ds = cfgrib.open_dataset(  # type: ignore[reportUnknownMemberType]
-                    str(path),
-                    indexpath="",  # avoid creating .idx sidecar files
-                )
-            except Exception as exc:
-                raise ForecastUnavailable(
-                    f"Failed to decode GRIB archive at {path}: {exc}"
-                ) from exc
-    except (OSError, PermissionError) as exc:
-        raise SourceUnavailable(f"Disk I/O error reading CaSPAr archive at {path}: {exc}") from exc
-
-    # The opened dataset is returned as-is; the caller (fetch_forecast) passes it
-    # through dataset_to_forecast_frame which validates the contract.
-    return ds.load()  # type: ignore[reportUnknownMemberType]
+            return ds.load()  # type: ignore[reportUnknownMemberType]
+        except (OSError, PermissionError) as exc:
+            raise SourceUnavailable(
+                f"Disk I/O error reading CaSPAr archive at {path}: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise ForecastUnavailable(f"Failed to decode netCDF archive at {path}: {exc}") from exc
+    else:
+        # GRIB2/GRIB: import cfgrib lazily — eccodes binary may be absent.
+        try:
+            import cfgrib  # type: ignore[reportMissingTypeStubs]
+        except ImportError as exc:
+            raise SourceUnavailable(
+                "cfgrib is not importable (eccodes binary unavailable)"
+            ) from exc
+        try:
+            ds = cfgrib.open_dataset(  # type: ignore[reportUnknownMemberType]
+                str(path),
+                indexpath="",  # avoid creating .idx sidecar files
+            )
+            return ds.load()  # type: ignore[reportUnknownMemberType]
+        except (OSError, PermissionError) as exc:
+            raise SourceUnavailable(
+                f"Disk I/O error reading CaSPAr archive at {path}: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise ForecastUnavailable(f"Failed to decode GRIB archive at {path}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
