@@ -184,8 +184,10 @@ def test_no_train_serve_skew() -> None:
     config = make_config(horizon_hours=3, lag_hours=2)
     frame = make_forecast_frame(_T0, _LEADS)
 
-    nwp_live = FakeNWP(frame)
-    nwp_hist = FakeNWP(frame)
+    # Distinct sources standing in for the live (inference) and historical (training)
+    # connectors — they differ only in is_live, exactly as the two injected connectors do.
+    nwp_live = FakeNWP(frame, is_live=True)
+    nwp_hist = FakeNWP(frame, is_live=False)
     obs_live = _obs_source_all_present()
     obs_hist = _obs_source_all_present()
 

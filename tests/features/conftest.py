@@ -88,13 +88,20 @@ def make_obs_frame(
 class FakeNWP(NWPSource):
     """Injectable NWPSource returning a prebuilt FORECAST_FRAME or raising `exc`."""
 
-    def __init__(self, frame: pd.DataFrame | None = None, exc: Exception | None = None) -> None:
+    def __init__(
+        self,
+        frame: pd.DataFrame | None = None,
+        exc: Exception | None = None,
+        *,
+        is_live: bool = True,
+    ) -> None:
         self._frame = frame
         self._exc = exc
+        self._is_live = is_live
 
     @property
     def is_live(self) -> bool:
-        return True
+        return self._is_live
 
     def fetch_forecast(
         self, issue_time: datetime, lat: float, lon: float, lead_hours: Sequence[int]
