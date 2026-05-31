@@ -18,6 +18,7 @@ from microclimate.config.schema import DeploymentConfig
 from microclimate.contracts.feature_matrix import FEATURE_SCHEMA_VERSION
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
 
+
 def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Initial great-circle bearing in degrees [0, 360) from point 1 to point 2."""
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -45,7 +46,8 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
     if snapshot.schema_version != SNAPSHOT_SCHEMA_VERSION:
         raise ValueError(
             f"snapshot.schema_version {snapshot.schema_version!r} != expected "
-            f"{SNAPSHOT_SCHEMA_VERSION!r}; refusing to build features from an incompatible snapshot."
+            f"{SNAPSHOT_SCHEMA_VERSION!r}; refusing to build features from an "
+            "incompatible snapshot."
         )
 
     leads = list(snapshot.lead_hours)
@@ -93,8 +95,12 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
         p0 = obs.get(f"obs_{tgt}_surface_pressure_hpa_lag0", math.nan)
         p3 = obs.get(f"obs_{tgt}_surface_pressure_hpa_lag3", math.nan)
         df[f"obs_{tgt}_ptend_3h"] = p0 - p3
-        dpd0 = obs.get(f"obs_{tgt}_temp_c_lag0", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag0", math.nan)
-        dpd3 = obs.get(f"obs_{tgt}_temp_c_lag3", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag3", math.nan)
+        dpd0 = obs.get(f"obs_{tgt}_temp_c_lag0", math.nan) - obs.get(
+            f"obs_{tgt}_dewpoint_c_lag0", math.nan
+        )
+        dpd3 = obs.get(f"obs_{tgt}_temp_c_lag3", math.nan) - obs.get(
+            f"obs_{tgt}_dewpoint_c_lag3", math.nan
+        )
         df[f"obs_{tgt}_dpd_tend_3h"] = dpd0 - dpd3
 
     # --- Advection (per neighbor): neighbor-target gradients at lag0 + upwind alignment. ---
