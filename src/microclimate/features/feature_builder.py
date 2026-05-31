@@ -65,4 +65,12 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
             for h in leads
         ]
 
+    # --- Observations (passthrough values + masks; scalars broadcast across all lead rows). ---
+    if snapshot.observation_features:
+        obs = snapshot.observation_features
+        masks = snapshot.observation_masks
+        for key, value in obs.items():
+            df[key] = value
+            df[f"{key}_mask"] = masks[key]
+
     return df

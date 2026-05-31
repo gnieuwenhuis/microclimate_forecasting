@@ -72,3 +72,26 @@ def test_nwp_pressure_tendency_nan_before_lead_4() -> None:
     assert early.isna().all()
     late = df.loc[df["lead_hour"].isin([4, 5]), "nwp_ptend_3h"]
     assert (late == 0.0).all()
+
+
+def test_obs_values_and_masks_passthrough() -> None:
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    assert (df["obs_T1_temp_c_lag0"] == PINNED["temp_c"]).all()
+    assert df["obs_T1_temp_c_lag0_mask"].all()
+    assert (df["obs_N1_precip_mm_lag2"] == PINNED["precip_mm"]).all()
+    assert df["obs_N1_precip_mm_lag2_mask"].all()
+
+
+def test_absent_obs_is_nan_and_mask_false() -> None:
+    config = make_config(horizon_hours=5, lag_hours=3)
+    ts = [_T0 - timedelta(hours=k) for k in range(4)]
+    frames = {
+        "T1": make_obs_frame("T1", ts, absent={(0, "temp_c")}),
+        "N1": make_obs_frame("N1", ts),
+    }
+    nwp = FakeNWP(make_forecast_frame(_T0, list(range(1, 6))))
+    snap = build_snapshot(config, _T0, nwp, {"fake": FakeObs(frames=frames)})
+    df = build_features(snap, config)
+    assert df["obs_T1_temp_c_lag0"].isna().all()
+    assert (~df["obs_T1_temp_c_lag0_mask"]).all()
