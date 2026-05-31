@@ -20,3 +20,11 @@ type = independence
 modules =
     microclimate.models
     microclimate.evaluation
+
+[importlinter:contract:feature_builder_purity]
+name = build_features is pure — must not import connectors
+type = forbidden
+source_modules =
+    microclimate.features.feature_builder
+forbidden_modules =
+    microclimate.connectors
