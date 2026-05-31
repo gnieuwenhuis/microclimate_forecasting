@@ -92,6 +92,18 @@ weather agency**. It corrects an existing official forecast for local bias.
   `obs_{station_id}_{var}_lag{k}` on a fixed hourly **lag grid** `lag0`(=`t0`) … `lag{lag_hours}`
   (absent slot → `NaN`, mask `False`); static → `static_lat`/`static_lon`/`static_elevation_m`
   (target only); temporal → `t0_hour_sin`/`t0_hour_cos`/`t0_doy_sin`/`t0_doy_cos`.
+- **Feature matrix** — the long-format, per-`(issue_time, lead_hour)` model-input rows
+  produced by `features.build_features` from a **feature snapshot**. One row per lead hour;
+  carries **derived features** plus the as-of-`t0` snapshot values broadcast across rows;
+  **label-free** (labels are attached downstream). Built at training-read time and at
+  inference by the **same** function, so its column set is identical for train and serve.
+- **Derived feature** — a feature computed from raw snapshot values (dewpoint depression,
+  pressure tendency, advection, per-lead-hour `valid_hour` encoding), as distinct from a
+  passthrough of a raw snapshot value. Derived features are pure functions of the snapshot
+  (ADR-0011, ADR-0012).
+- **Feature schema version** — `FEATURE_SCHEMA_VERSION`, the version of the **derived
+  feature** set, distinct from `SNAPSHOT_SCHEMA_VERSION` (the raw-snapshot contract). A model
+  records the feature version it trained on so a stale-feature champion is refused.
 - **Issue time** (`t₀`) — the reference time a feature snapshot is built at. The forecast
   predicts `t₀+1 … t₀+48`.
 - **As-of reconstruction** — the invariant that a feature snapshot only ever uses

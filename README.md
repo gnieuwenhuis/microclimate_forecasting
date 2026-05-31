@@ -21,8 +21,10 @@ ABCs, a single feature-snapshot builder, source-eligibility validation, and an
 
 Pre-1.0, built bottom-up. The **data backbone is implemented**: typed contracts, validated
 deployment config, the connector framework with live + historical sources (Environment
-Canada observations, HRDPS from Datamart and CaSPAr), and `features.build_snapshot` — the
-single as-of feature path shared by training and inference (ADR-0011).
+Canada observations, HRDPS from Datamart and CaSPAr), `features.build_snapshot` — the
+single as-of feature path shared by training and inference (ADR-0011) — and
+`features.build_features` — the read-time transform from a `FeatureSnapshot` to the feature
+matrix (derived features + explode-to-per-lead-hour rows, ADR-0012).
 
 **Not yet implemented** (currently stubs): the temp/PoP models, evaluation + publish gate,
 forecast-JSON / registry publication, and the inference/training pipeline CLIs.
