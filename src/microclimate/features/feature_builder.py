@@ -73,4 +73,19 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
             df[key] = value
             df[f"{key}_mask"] = masks[key]
 
+        station_ids = [config.target.station_id, *[ref.station_id for ref in config.neighbors]]
+        for sid in station_ids:
+            for k in range(config.lag_hours + 1):
+                t = obs.get(f"obs_{sid}_temp_c_lag{k}", math.nan)
+                d = obs.get(f"obs_{sid}_dewpoint_c_lag{k}", math.nan)
+                df[f"obs_{sid}_dpd_lag{k}"] = t - d  # scalar broadcast
+
+        tgt = config.target.station_id
+        p0 = obs.get(f"obs_{tgt}_surface_pressure_hpa_lag0", math.nan)
+        p3 = obs.get(f"obs_{tgt}_surface_pressure_hpa_lag3", math.nan)
+        df[f"obs_{tgt}_ptend_3h"] = p0 - p3
+        dpd0 = obs.get(f"obs_{tgt}_temp_c_lag0", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag0", math.nan)
+        dpd3 = obs.get(f"obs_{tgt}_temp_c_lag3", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag3", math.nan)
+        df[f"obs_{tgt}_dpd_tend_3h"] = dpd0 - dpd3
+
     return df

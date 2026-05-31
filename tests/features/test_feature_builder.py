@@ -95,3 +95,25 @@ def test_absent_obs_is_nan_and_mask_false() -> None:
     df = build_features(snap, config)
     assert df["obs_T1_temp_c_lag0"].isna().all()
     assert (~df["obs_T1_temp_c_lag0_mask"]).all()
+
+
+def test_obs_dewpoint_depression_per_station_lag() -> None:
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    expected = PINNED["temp_c"] - PINNED["dewpoint_c"]
+    assert (df["obs_T1_dpd_lag0"] == expected).all()
+    assert (df["obs_N1_dpd_lag3"] == expected).all()
+
+
+def test_target_tendencies_present_are_zero() -> None:
+    snap, config = _snapshot(horizon_hours=5, lag_hours=3)
+    df = build_features(snap, config)
+    assert (df["obs_T1_ptend_3h"] == 0.0).all()
+    assert (df["obs_T1_dpd_tend_3h"] == 0.0).all()
+
+
+def test_target_tendencies_nan_when_lag3_missing() -> None:
+    snap, config = _snapshot(horizon_hours=5, lag_hours=2)
+    df = build_features(snap, config)
+    assert df["obs_T1_ptend_3h"].isna().all()
+    assert df["obs_T1_dpd_tend_3h"].isna().all()
