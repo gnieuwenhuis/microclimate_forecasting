@@ -82,6 +82,16 @@ weather agency**. It corrects an existing official forecast for local bias.
   (lead 1–48 h at the target cell), observation features (recent obs from target +
   neighbors, lag-windowed, each with a **missingness mask**), static features (lat/lon,
   elevation), and temporal features (cyclical encodings of `t₀` and lead hour).
+  The snapshot is built by `features.build_snapshot`, which is the **normalization / as-of
+  boundary**: it stores *raw canonicalized values only* — one object per **issue time** spanning
+  all lead hours — and never `fetch_live` (only as-of `fetch_historical` bounded to `t0`), which
+  is the train/serve skew guarantee (ADR-0011). Derived features (dewpoint depression, pressure
+  tendency, advection, per-lead-hour encodings) and the explode-to-per-lead-hour rows are
+  *downstream* pure functions of the snapshot. **Feature-key conventions:** NWP →
+  `nwp_{var}_h{lead}` (8 variables × leads `1…horizon_hours`, target cell only); observations →
+  `obs_{station_id}_{var}_lag{k}` on a fixed hourly **lag grid** `lag0`(=`t0`) … `lag{lag_hours}`
+  (absent slot → `NaN`, mask `False`); static → `static_lat`/`static_lon`/`static_elevation_m`
+  (target only); temporal → `t0_hour_sin`/`t0_hour_cos`/`t0_doy_sin`/`t0_doy_cos`.
 - **Issue time** (`t₀`) — the reference time a feature snapshot is built at. The forecast
   predicts `t₀+1 … t₀+48`.
 - **As-of reconstruction** — the invariant that a feature snapshot only ever uses
