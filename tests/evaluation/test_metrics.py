@@ -1,4 +1,3 @@
-# tests/evaluation/test_metrics.py
 from __future__ import annotations
 
 import pandas as pd
@@ -22,8 +21,9 @@ def test_temp_skill_by_lead() -> None:
     out = temp_skill_by_lead(df).set_index("lead_hour")
     assert out.loc[1, "mae"] == 1.0
     assert out.loc[1, "rmse"] == 1.0
+    assert out.loc[1, "baseline_mae"] == 2.0
     assert out.loc[1, "baseline_rmse"] == 2.0
-    assert out.loc[1, "skill"] == 0.5
+    assert out.loc[1, "skill"] == 0.5  # MAE skill: 1 - 1/2
     assert out.loc[1, "n"] == 2
 
 

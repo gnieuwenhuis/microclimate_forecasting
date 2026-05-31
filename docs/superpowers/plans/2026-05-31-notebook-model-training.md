@@ -262,8 +262,9 @@ def test_temp_skill_by_lead() -> None:
     out = temp_skill_by_lead(df).set_index("lead_hour")
     assert out.loc[1, "mae"] == 1.0
     assert out.loc[1, "rmse"] == 1.0
+    assert out.loc[1, "baseline_mae"] == 2.0
     assert out.loc[1, "baseline_rmse"] == 2.0
-    assert out.loc[1, "skill"] == 0.5
+    assert out.loc[1, "skill"] == 0.5  # MAE skill: 1 - 1/2
     assert out.loc[1, "n"] == 2
 
 
@@ -324,21 +325,27 @@ def temp_skill_by_lead(
     label_col: str = "label_temp_c",
     baseline_col: str = "nwp_temp_c",
 ) -> pd.DataFrame:
-    """Per-lead MAE/RMSE and RMSE skill vs baseline. skill = 1 - rmse / baseline_rmse."""
+    """Per-lead MAE/RMSE and MAE skill vs baseline (CONTEXT.md: "MAE skill for temp").
+
+    skill = 1 - mae / baseline_mae, NaN where the baseline is perfect (baseline_mae == 0).
+    rmse / baseline_rmse are reported alongside as diagnostics.
+    """
     d = df.dropna(subset=[pred_col, label_col, baseline_col]).copy()
     d["_ae"] = (d[pred_col] - d[label_col]).abs()
     d["_se"] = (d[pred_col] - d[label_col]) ** 2
+    d["_bae"] = (d[baseline_col] - d[label_col]).abs()
     d["_bse"] = (d[baseline_col] - d[label_col]) ** 2
     g = d.groupby("lead_hour")
     out = pd.DataFrame(
         {
             "mae": g["_ae"].mean(),
             "rmse": np.sqrt(g["_se"].mean()),
+            "baseline_mae": g["_bae"].mean(),
             "baseline_rmse": np.sqrt(g["_bse"].mean()),
             "n": g.size(),
         }
     ).reset_index()
-    out["skill"] = 1.0 - out["rmse"] / out["baseline_rmse"]
+    out["skill"] = 1.0 - out["mae"] / out["baseline_mae"].replace(0.0, np.nan)
     return out
 
 
