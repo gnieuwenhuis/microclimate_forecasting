@@ -48,7 +48,10 @@ issue_times = [START + timedelta(hours=i) for i in range(N_ISSUE_TIMES)]
 
 # %%
 rows = assemble_or_load(
-    config, nwp, observations, issue_times,  # type: ignore[arg-type]
+    config,
+    nwp,
+    observations,
+    issue_times,  # type: ignore[arg-type]
     cache_path=ARTIFACTS / f"{DEPLOYMENT_ID}_rows.parquet",
 )
 print(f"{len(rows):,} rows  |  {rows['issue_time'].nunique()} issue times")
@@ -81,10 +84,14 @@ ts = temp_skill_by_lead(test)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.plot(ts["lead_hour"], ts["rmse"], label="model RMSE")
 ax1.plot(ts["lead_hour"], ts["baseline_rmse"], label="HRDPS RMSE")
-ax1.set_xlabel("lead hour"); ax1.set_ylabel("°C"); ax1.legend(); ax1.set_title("RMSE")
+ax1.set_xlabel("lead hour")
+ax1.set_ylabel("°C")
+ax1.legend()
+ax1.set_title("RMSE")
 ax2.axhline(0, color="grey", lw=0.8)
 ax2.plot(ts["lead_hour"], ts["skill"])
-ax2.set_xlabel("lead hour"); ax2.set_title("RMSE skill (>0 beats HRDPS)")
+ax2.set_xlabel("lead hour")
+ax2.set_title("RMSE skill (>0 beats HRDPS)")
 plt.tight_layout()
 
 # %% [markdown]
@@ -95,10 +102,14 @@ fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.scatter(test["label_temp_c"], test["pred_temp_c"], s=4, alpha=0.3)
 lims = [test["label_temp_c"].min(), test["label_temp_c"].max()]
 ax1.plot(lims, lims, color="red", lw=1)
-ax1.set_xlabel("observed °C"); ax1.set_ylabel("predicted °C"); ax1.set_title("pred vs actual")
+ax1.set_xlabel("observed °C")
+ax1.set_ylabel("predicted °C")
+ax1.set_title("pred vs actual")
 ax2.scatter(test["pred_temp_c"], test["pred_temp_c"] - test["label_temp_c"], s=4, alpha=0.3)
 ax2.axhline(0, color="red", lw=1)
-ax2.set_xlabel("predicted °C"); ax2.set_ylabel("residual °C"); ax2.set_title("residuals")
+ax2.set_xlabel("predicted °C")
+ax2.set_ylabel("residual °C")
+ax2.set_title("residuals")
 plt.tight_layout()
 
 # %% [markdown]
@@ -110,20 +121,28 @@ rel = reliability_table(test)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.axhline(0, color="grey", lw=0.8)
 ax1.plot(ps["lead_hour"], ps["bss"])
-ax1.set_xlabel("lead hour"); ax1.set_title("Brier Skill Score (>0 beats HRDPS)")
+ax1.set_xlabel("lead hour")
+ax1.set_title("Brier Skill Score (>0 beats HRDPS)")
 ax2.plot([0, 1], [0, 1], color="grey", lw=1, label="perfect")
 ax2.plot(rel["mean_pred"], rel["observed_freq"], marker="o", label="model")
-ax2.set_xlabel("predicted PoP"); ax2.set_ylabel("observed frequency")
-ax2.set_title("reliability"); ax2.legend()
+ax2.set_xlabel("predicted PoP")
+ax2.set_ylabel("observed frequency")
+ax2.set_title("reliability")
+ax2.legend()
 plt.tight_layout()
 
 # %% [markdown]
 # ## Feature importances
 
 # %%
-imp = pd.Series(
-    temp._model.feature_importances_, index=temp._features  # noqa: SLF001
-).sort_values(ascending=False).head(20)
+imp = (
+    pd.Series(
+        temp._model.feature_importances_,
+        index=temp._features,  # noqa: SLF001
+    )
+    .sort_values(ascending=False)
+    .head(20)
+)
 imp.iloc[::-1].plot.barh(figsize=(8, 6), title="Temp model — top feature importances")
 plt.tight_layout()
 
