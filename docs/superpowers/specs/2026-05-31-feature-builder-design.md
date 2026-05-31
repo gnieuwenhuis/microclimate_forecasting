@@ -120,10 +120,10 @@ given `t0`.
 | --- | --- |
 | `nwp_temp_c` … `nwp_wind_dir_deg` (8) | passthrough of `nwp_{var}_h{h}` |
 | `nwp_dpd` | `nwp_temp_c − nwp_dewpoint_c` (dewpoint depression) |
-| `nwp_ptend_3h` | `nwp_pressure_h − nwp_pressure_{h−3}`; **NaN for `lead < 3`** (structural, not missingness) |
+| `nwp_ptend_3h` | `nwp_pressure_h − nwp_pressure_{h−3}`; **NaN for `lead < 4`** (needs `h−3 ≥ 1`; structural, not missingness) |
 
 NWP is complete-or-fail upstream, so NWP columns are never missingness-NaN; the only NWP
-NaN is the structural `ptend` one at `lead < 3`.
+NaN is the structural `ptend` one at `lead < 4`.
 
 ### Observations (passthrough + derived; broadcast)
 
@@ -184,8 +184,8 @@ horizon; `t0_doy_*` already covers seasonality).
 - **Missing observations:** passthrough value NaN + `mask=False`; derived obs/advection
   features → NaN when any input absent. The model degrades gracefully (LightGBM native NaN
   handling) rather than crashing.
-- **Structural NaN:** `nwp_ptend_3h` at `lead < 3`; tendencies when an endpoint lag is
-  absent.
+- **Structural NaN:** `nwp_ptend_3h` at `lead < 4`; tendencies when an endpoint lag is
+  absent (e.g. a deployment with `lag_hours < 3`).
 - **Empty neighbor list:** no `adv_*` and no neighbor `obs_*` columns; still deployment-stable.
 - **Off-hour `t0` / NWP-only snapshot:** inherited from `build_snapshot` semantics — absent
   obs slots are already NaN+mask-False in the snapshot, so the transform simply propagates.
@@ -203,7 +203,7 @@ solved in this spec.
 - **Golden fixtures:** hand-constructed `FeatureSnapshot` → expected feature matrix
   (values + column set).
 - **Property tests:** column-set determinism from config; mask propagation; `nwp_ptend_3h`
-  NaN at `lead < 3`; tendency NaN on missing endpoints; advection sign and upwind-alignment
+  NaN at `lead < 4`; tendency NaN on missing endpoints; advection sign and upwind-alignment
   correctness (a neighbor directly upwind with steady wind yields positive alignment).
 - **Train/serve column-parity test:** a training-`t0` snapshot and an inference-`t0`
   snapshot for the same config produce identical columns in identical order.
