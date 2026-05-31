@@ -67,3 +67,31 @@ def assemble_or_load(
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     rows.to_parquet(cache_path, index=False)
     return rows
+
+
+def chronological_split(
+    rows: pd.DataFrame,
+    *,
+    train_frac: float = 0.6,
+    calib_frac: float = 0.2,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split rows into chronological train | calib | test by *whole* issue_time.
+
+    Splits on unique sorted issue_times (never across a single issue_time) so adjacent,
+    strongly-correlated rows can't leak between sets. The remainder after train+calib is the
+    test holdout. Temp trains on train+calib; PoP trains on train and calibrates on calib.
+    """
+    if train_frac + calib_frac >= 1.0:
+        raise ValueError("train_frac + calib_frac must leave a non-empty test holdout")
+    times = pd.Index(sorted(rows["issue_time"].unique()))
+    n = len(times)
+    n_train = int(n * train_frac)
+    n_calib = int(n * calib_frac)
+    train_times = set(times[:n_train])
+    calib_times = set(times[n_train : n_train + n_calib])
+    test_times = set(times[n_train + n_calib :])
+    return (
+        rows[rows["issue_time"].isin(train_times)].copy(),
+        rows[rows["issue_time"].isin(calib_times)].copy(),
+        rows[rows["issue_time"].isin(test_times)].copy(),
+    )

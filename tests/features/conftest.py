@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from tests.fakes import (  # noqa: F401
+from tests.fakes import (
     PHYS,
     PINNED,
     FakeNWP,
@@ -12,3 +12,13 @@ from tests.fakes import (  # noqa: F401
     make_forecast_frame,
     make_obs_frame,
 )
+
+__all__ = [
+    "PHYS",
+    "PINNED",
+    "FakeNWP",
+    "FakeObs",
+    "make_config",
+    "make_forecast_frame",
+    "make_obs_frame",
+]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 
@@ -45,7 +46,9 @@ def test_assembles_labeled_rows_with_cardinality() -> None:
 
 def test_threshold_drives_occurrence() -> None:
     config = make_config(horizon_hours=3, lag_hours=2)
-    config = config.model_copy(update={"label": config.label.model_copy(update={"precip_occurrence_threshold_mm": 0.6})})
+    config = config.model_copy(
+        update={"label": config.label.model_copy(update={"precip_occurrence_threshold_mm": 0.6})}
+    )
     nwp, obs = _sources()
 
     rows = assemble_training_rows(config, nwp, obs, [_T0])
@@ -64,7 +67,7 @@ def test_multiple_issue_times_concatenate() -> None:
     assert set(rows["issue_time"]) == {pd.Timestamp(_T0), pd.Timestamp(t1)}
 
 
-def test_assemble_or_load_uses_cache(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_assemble_or_load_uses_cache(tmp_path: Path) -> None:
     from microclimate.connectors.base import SourceUnavailable
     from microclimate.pipelines.training_data import assemble_or_load
 
@@ -83,3 +86,19 @@ def test_assemble_or_load_uses_cache(tmp_path) -> None:  # type: ignore[no-untyp
     pd.testing.assert_frame_equal(
         first.reset_index(drop=True), second.reset_index(drop=True), check_like=True
     )
+
+
+def test_chronological_split_by_issue_time() -> None:
+    from microclimate.pipelines.training_data import chronological_split
+
+    issue_times = [pd.Timestamp(_T0) + pd.Timedelta(hours=i) for i in range(10)]
+    df = pd.DataFrame({"issue_time": issue_times, "lead_hour": 1, "label_temp_c": 0.0})
+
+    train, calib, test = chronological_split(df, train_frac=0.6, calib_frac=0.2)
+
+    assert list(train["issue_time"]) == issue_times[:6]
+    assert list(calib["issue_time"]) == issue_times[6:8]
+    assert list(test["issue_time"]) == issue_times[8:]
+    # no issue_time leaks across splits
+    assert set(train["issue_time"]) & set(test["issue_time"]) == set()
+    assert set(train["issue_time"]) & set(calib["issue_time"]) == set()
