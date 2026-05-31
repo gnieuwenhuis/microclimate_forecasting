@@ -44,3 +44,26 @@ def assemble_training_rows(
     target_obs = target_source.fetch_historical(config.target.station_id, start, end)
 
     return attach_labels(matrix, target_obs, config.label.precip_occurrence_threshold_mm)
+
+
+def assemble_or_load(
+    config: DeploymentConfig,
+    nwp: NWPSource,
+    observations: Mapping[str, ObservationSource],
+    issue_times: Iterable[datetime],
+    *,
+    cache_path: Path,
+) -> pd.DataFrame:
+    """Read assembled rows from a local Parquet cache, else assemble and write it.
+
+    Local-dev convenience so notebook re-runs don't re-pull CaSPAr. The cache is keyed by
+    the caller's chosen path; rotate the path when the issue-time range or snapshot schema
+    changes. Derived features are recomputed by build_features on read, so the derived
+    FEATURE_SCHEMA_VERSION is intentionally NOT part of the key (ADR-0012).
+    """
+    if cache_path.exists():
+        return pd.read_parquet(cache_path)
+    rows = assemble_training_rows(config, nwp, observations, issue_times)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    rows.to_parquet(cache_path, index=False)
+    return rows

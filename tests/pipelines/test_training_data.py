@@ -62,3 +62,24 @@ def test_multiple_issue_times_concatenate() -> None:
     rows = assemble_training_rows(config, nwp, obs, [_T0, t1])
     assert len(rows) == 6
     assert set(rows["issue_time"]) == {pd.Timestamp(_T0), pd.Timestamp(t1)}
+
+
+def test_assemble_or_load_uses_cache(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from microclimate.connectors.base import SourceUnavailable
+    from microclimate.pipelines.training_data import assemble_or_load
+
+    config = make_config(horizon_hours=3, lag_hours=2)
+    nwp, obs = _sources()
+    cache = tmp_path / "rows.parquet"
+
+    first = assemble_or_load(config, nwp, obs, [_T0], cache_path=cache)
+    assert cache.exists()
+
+    # Second call with exploding sources must still succeed -> proves it read the cache.
+    boom_nwp = FakeNWP(exc=SourceUnavailable("should not be called"))
+    boom_obs = {"fake": FakeObs(exc=SourceUnavailable("should not be called"))}
+    second = assemble_or_load(config, boom_nwp, boom_obs, [_T0], cache_path=cache)
+
+    pd.testing.assert_frame_equal(
+        first.reset_index(drop=True), second.reset_index(drop=True), check_like=True
+    )
