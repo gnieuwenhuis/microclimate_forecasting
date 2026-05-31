@@ -57,4 +57,12 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
         for var in _PHYSICAL_VARS:
             df[f"nwp_{var}"] = [nwp[f"nwp_{var}_h{h}"] for h in leads]
 
+        df["nwp_dpd"] = [nwp[f"nwp_temp_c_h{h}"] - nwp[f"nwp_dewpoint_c_h{h}"] for h in leads]
+        df["nwp_ptend_3h"] = [
+            nwp[f"nwp_surface_pressure_hpa_h{h}"] - nwp[f"nwp_surface_pressure_hpa_h{h - 3}"]
+            if h - 3 >= 1
+            else math.nan
+            for h in leads
+        ]
+
     return df

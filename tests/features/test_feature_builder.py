@@ -57,3 +57,18 @@ def test_rejects_snapshot_schema_mismatch() -> None:
     bad = snap.model_copy(update={"schema_version": "0.0.0-bogus"})
     with pytest.raises(ValueError, match="schema_version"):
         build_features(bad, config)
+
+
+def test_nwp_dewpoint_depression() -> None:
+    snap, config = _snapshot(horizon_hours=5)
+    df = build_features(snap, config)
+    assert (df["nwp_dpd"] == PINNED["temp_c"] - PINNED["dewpoint_c"]).all()
+
+
+def test_nwp_pressure_tendency_nan_before_lead_4() -> None:
+    snap, config = _snapshot(horizon_hours=5)
+    df = build_features(snap, config)
+    early = df.loc[df["lead_hour"].isin([1, 2, 3]), "nwp_ptend_3h"]
+    assert early.isna().all()
+    late = df.loc[df["lead_hour"].isin([4, 5]), "nwp_ptend_3h"]
+    assert (late == 0.0).all()
