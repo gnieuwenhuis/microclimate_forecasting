@@ -127,3 +127,27 @@ def test_all_obs_fail_still_emits_nwp_only_snapshot() -> None:
 
     assert len(snap.nwp_features) == 8 * 2
     assert all(m is False for m in snap.observation_masks.values())
+
+
+def test_nwp_forecast_unavailable_propagates() -> None:
+    config = make_config(horizon_hours=1, lag_hours=0)
+    nwp = FakeNWP(exc=ForecastUnavailable("no run for issue_time"))
+    obs = FakeObs(frames={"T1": make_obs_frame("T1", [_T0]), "N1": make_obs_frame("N1", [_T0])})
+    with pytest.raises(ForecastUnavailable):
+        build_snapshot(config, _T0, nwp, {"fake": obs})
+
+
+def test_nwp_source_unavailable_propagates() -> None:
+    config = make_config(horizon_hours=1, lag_hours=0)
+    nwp = FakeNWP(exc=SourceUnavailable("datamart down"))
+    obs = FakeObs(frames={"T1": make_obs_frame("T1", [_T0]), "N1": make_obs_frame("N1", [_T0])})
+    with pytest.raises(SourceUnavailable):
+        build_snapshot(config, _T0, nwp, {"fake": obs})
+
+
+def test_station_not_found_propagates() -> None:
+    config = make_config(horizon_hours=1, lag_hours=0)
+    nwp = FakeNWP(make_forecast_frame(_T0, [1]))
+    obs = FakeObs(exc=StationNotFound("bad station id"))
+    with pytest.raises(StationNotFound):
+        build_snapshot(config, _T0, nwp, {"fake": obs})
