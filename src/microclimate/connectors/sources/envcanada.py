@@ -176,7 +176,6 @@ def _parse_eccc_csv(csv_text: str, station_id: str) -> pd.DataFrame:
             dtype=str,
             encoding="utf-8-sig",
             keep_default_na=False,
-            on_bad_lines="skip",
         )
     except Exception as exc:
         raise StationNotFound(f"Cannot parse ECCC CSV for station {station_id!r}: {exc}") from exc
@@ -338,7 +337,12 @@ class EnvCanadaSource(ObservationSource):
         start_utc = _ensure_utc(start)
         end_utc = _ensure_utc(end)
 
-        months = _month_range(start_utc, end_utc)
+        # Derive the CSV month-keys from LST bounds, not UTC bounds.
+        # ECCC bulk CSVs are keyed by LST calendar month (LST = UTC − 7h).
+        # A row whose UTC timestamp is T lives in the CSV for LST month of (T − offset).
+        start_lst = start_utc - _LST_UTC_OFFSET
+        end_lst = end_utc - _LST_UTC_OFFSET
+        months = _month_range(start_lst, end_lst)
         frames: list[pd.DataFrame] = []
         for year, month in months:
             csv_text = self._fetcher(station_id, year, month)
@@ -347,8 +351,9 @@ class EnvCanadaSource(ObservationSource):
             df = _parse_eccc_csv(csv_text, station_id)
             frames.append(df)
 
-        combined = pd.concat(frames, ignore_index=True)  # type: ignore[reportUnknownMemberType]
-        # Filter to the requested window (inclusive).
+        combined: pd.DataFrame = pd.concat(frames, ignore_index=True)  # type: ignore[reportUnknownMemberType]
+        combined = combined.drop_duplicates(subset="timestamp")  # type: ignore[reportUnknownMemberType]
+        # Filter to the requested window (inclusive); filtering stays in UTC (correct).
         mask = (combined["timestamp"] >= pd.Timestamp(start_utc)) & (
             combined["timestamp"] <= pd.Timestamp(end_utc)
         )
@@ -380,18 +385,30 @@ class EnvCanadaSource(ObservationSource):
             StationNotFound:   If the response is not a recognisable ECCC station CSV.
         """
         since_utc = _ensure_utc(since)
-        now = datetime.now(tz=UTC)
-        year, month = now.year, now.month
+        now_utc = datetime.now(tz=UTC)
 
-        csv_text = self._fetcher(station_id, year, month)
-        df = _parse_eccc_csv(csv_text, station_id)
+        # Derive the CSV month-keys from LST bounds, not UTC bounds.
+        # ECCC bulk CSVs are keyed by LST calendar month (LST = UTC − 7h).
+        now_lst = now_utc - _LST_UTC_OFFSET
+        since_lst = since_utc - _LST_UTC_OFFSET
+        months = _month_range(since_lst, now_lst)
 
-        if len(df) == 0:
+        frames: list[pd.DataFrame] = []
+        for year, month in months:
+            csv_text = self._fetcher(station_id, year, month)
+            df_month = _parse_eccc_csv(csv_text, station_id)
+            frames.append(df_month)
+
+        combined: pd.DataFrame = pd.concat(frames, ignore_index=True)  # type: ignore[reportUnknownMemberType]
+        combined = combined.drop_duplicates(subset="timestamp")  # type: ignore[reportUnknownMemberType]
+
+        if len(combined) == 0:
             return _empty_obs_frame()
 
-        mask = df["timestamp"] >= pd.Timestamp(since_utc)
+        # Filter to rows >= since; filtering stays in UTC (correct).
+        mask = combined["timestamp"] >= pd.Timestamp(since_utc)
         result: pd.DataFrame = (
-            df.loc[mask].sort_values("timestamp").reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
+            combined.loc[mask].sort_values("timestamp").reset_index(drop=True)  # type: ignore[reportUnknownMemberType]
         )
 
         # An empty result is valid: the station exists but has no data since the cutoff.

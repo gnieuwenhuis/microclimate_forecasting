@@ -390,11 +390,12 @@ def test_multi_month_fetch_historical_stitches_months() -> None:
         return fixtures_with_empty.get((year, month), empty_csv)
 
     source2 = EnvCanadaSource(fetcher=multi_fetcher_with_empty)
-    # Span April–June; May is empty. Window covers all three months.
+    # Span April–June (LST-keyed); May is empty. Window covers all three LST months.
     # April rows are inside the window; May is empty (no abort); June CSV has May-dated
     # timestamps which fall outside the window filter → only April rows survive.
+    # end2 must be >= 2026-06-01 07:00 UTC so that end_lst falls in June LST (UTC-7).
     start2 = datetime(2026, 4, 27, 10, 0, tzinfo=UTC)
-    end2 = datetime(2026, 6, 1, 0, 0, tzinfo=UTC)  # spans Apr, May, Jun months
+    end2 = datetime(2026, 6, 2, 0, 0, tzinfo=UTC)  # spans Apr, May, Jun LST months
     df2 = source2.fetch_historical("49268", start2, end2)
 
     # Fetcher called for all three months
@@ -409,7 +410,85 @@ def test_multi_month_fetch_historical_stitches_months() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 9. Registry — zero-arg instantiation still works
+# 9. UTC/LST month-boundary correctness
+# ---------------------------------------------------------------------------
+
+
+def test_historical_fetches_lst_keyed_month_at_utc_boundary() -> None:
+    """fetch_historical at a UTC/LST month boundary returns the row from the LST-keyed month.
+
+    Scenario: a row stored as ``2026-04-30 20:00 LST`` has UTC timestamp
+    ``2026-05-01 03:00 UTC`` (20:00 + 7h). It lives in the **April** CSV.
+    A UTC window ``2026-05-01 00:00–06:00 UTC`` must therefore fetch the April CSV
+    and return that row.
+
+    Against the old UTC-keyed code (which would fetch only May) this test returns an
+    empty frame, causing the ``assert len(df) == 1`` to fail.
+    """
+    april_csv = load_fixture("april_lst_boundary.csv")
+    # May has no data for this window
+    empty_csv = load_fixture("empty_month.csv")
+
+    call_log: list[tuple[int, int]] = []
+    fixtures: dict[tuple[int, int], str] = {
+        (2026, 4): april_csv,
+        (2026, 5): empty_csv,
+    }
+
+    def boundary_fetcher(station_id: str, year: int, month: int) -> str:  # noqa: ARG001
+        call_log.append((year, month))
+        return fixtures.get((year, month), empty_csv)
+
+    source = EnvCanadaSource(fetcher=boundary_fetcher)
+
+    # UTC window: 2026-05-01 03:00 → 2026-05-01 06:00 UTC
+    # The row 2026-04-30 20:00 LST = 2026-05-01 03:00 UTC falls inside this window,
+    # but it lives in the April CSV (keyed by LST month).
+    start = datetime(2026, 5, 1, 3, 0, tzinfo=UTC)
+    end = datetime(2026, 5, 1, 6, 0, tzinfo=UTC)
+    df = source.fetch_historical("49268", start, end)
+
+    # The April-CSV row (LST 2026-04-30 20:00 → UTC 2026-05-01 03:00) must be returned.
+    expected_ts = pd.Timestamp("2026-05-01 03:00:00", tz="UTC")
+    assert len(df) == 1, f"Expected 1 row, got {len(df)} — old UTC-keyed code returns 0"
+    assert df["timestamp"].iloc[0] == expected_ts
+
+    # The fetcher must have been asked for April (the LST-keyed month), not May.
+    assert (2026, 4) in call_log, "Fetcher was not asked for (2026, 4) — LST-keyed month missing"
+    assert (2026, 5) not in call_log, "Fetcher asked for (2026, 5) — should only need April"
+
+    OBSERVATION_FRAME.validate(df)
+
+
+def test_lst_month_range_covers_both_sides_of_boundary() -> None:
+    """_month_range on LST-converted bounds spans the correct months.
+
+    Unit test for the LST-bounds month-selection logic used in both fetch methods.
+    Verifies that a UTC window straddling the April→May boundary at UTC-midnight
+    (which is still April in LST) asks for April, not only May.
+    """
+    from microclimate.connectors.sources.envcanada import (
+        _LST_UTC_OFFSET,  # type: ignore[reportPrivateUsage]
+        _month_range,  # type: ignore[reportPrivateUsage]
+    )
+
+    # UTC window: 2026-05-01 00:00 → 2026-05-01 06:00
+    # In LST: 2026-04-30 17:00 → 2026-04-30 23:00  → entirely in April LST month
+    start_utc = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    end_utc = datetime(2026, 5, 1, 6, 0, tzinfo=UTC)
+
+    start_lst = start_utc - _LST_UTC_OFFSET
+    end_lst = end_utc - _LST_UTC_OFFSET
+    months = _month_range(start_lst, end_lst)
+
+    assert months == [(2026, 4)], (
+        f"Expected [(2026, 4)] from LST-keyed range, got {months} — "
+        "old UTC-keyed code would produce [(2026, 5)]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 10. Registry — zero-arg instantiation still works
 # ---------------------------------------------------------------------------
 
 
