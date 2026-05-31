@@ -1,63 +1,58 @@
 # Deployment: lethbridge  (seeded — trainable from day one)
 #
 # Downscales HRDPS to a free, deep-history official station near Henderson Lake.
-# This is the pipeline-proving deployment: ECCC + ACIS sources, CaSPAr historical seed,
-# champion/challenger publish gate. See ADR-0001, ADR-0006, ADR-0008.
+# This is the pipeline-proving deployment: ECCC observations, CaSPAr historical seed,
+# champion/challenger publish gate. See ADR-0001, ADR-0006, ADR-0008, ADR-0010.
 #
-# Values marked `# CONFIRM` need a one-time lookup in the ACIS data viewer
-# (https://acis.alberta.ca/weather-data-viewer.jsp) — the exact ACIS station identifiers
-# and neighbor coordinates are the deferred config-authoring values from the scaffolding
-# spec. Coordinates given are best-known.
+# Target + neighbors are live ECCC stations on the ungated bulk hourly CSV. ACIS was
+# dropped: its only ungated feed is daily, and no ungated *live hourly* feed exists for
+# the ag stations (spike #3 / docs/spikes/0003; pivot recorded in ADR-0010).
 
 deployment_id: lethbridge
 # Seeded deployment: every observation source has deep history; training uses the CaSPAr
 # seed + the logger. (v1 has only this strategy; cold-start is deferred — ADR-0008.)
 
 target:
-  # Closest free, deep-history official station to Henderson Lake (~6 km E, at 49.687,
-  # -112.826). An ACIS ag-station is a better skill demo than YQL (HRDPS does not already
-  # nail it). ACIS station #9835; identifier confirmed from the ACIS station dropdown.
-  station_id: "9835"                       # ACIS: Lethbridge Demo Farm IMCIN
-  connector_key: acis
-  lat: 49.68872
-  lon: -112.74494
-  elevation_m: 903
+  # ECCC Lethbridge CDA: a non-airport ag research station ~5 km E of Lethbridge and ~4 km
+  # from Henderson Lake (49.687, -112.826). Live on the ungated ECCC bulk hourly CSV to
+  # 2026-05-29, deep hourly history 1994–present; carries temp/dewpoint/RH/precip/pressure.
+  # Valley-bench (non-airport) siting => more local bias for HRDPS to learn than YQL.
+  # Chosen over ACIS Demo Farm #9835 once spike #3 proved ACIS has no ungated live-hourly
+  # feed (ADR-0010). Fallback target if CDA fails the publish gate: YQL, stnID 49268.
+  station_id: "2265"                         # ECCC Lethbridge CDA (MSC StationID; Climate ID 3033890)
+  connector_key: envcanada
+  lat: 49.70
+  lon: -112.77
+  elevation_m: 910
 
 neighbors:
-  # Free sources only. YQL is the regional baseline; ACIS county stations are the
-  # storm-advection vectors called out in the PoP literature (north/NE/SW of the city).
-  - station_id: "49268"                    # ECCC Lethbridge Airport, TC YQL. MSC StationID for the
-                                           # bulk hourly endpoint; Climate ID 3033875, hourly 2011–present
-                                           # (ECCC station inventory). NB: stnID 2263 / "LETHBRIDGE A" is
-                                           # the decommissioned 1938–2008 station — do not use.
+  # Live ECCC hourly stations only (advection vectors toward the target). The close 8–60 km
+  # advection ring is dead on the ungated feed (ag-network stations stopped reporting hourly
+  # by 2023/24 — spike #3), so the nearest live neighbors are 60–100 km out. A 60–100 km
+  # lever arm is ~1.5–3 h of advection lead at storm speeds — coarse but useful across 1–48 h.
+  # Per-variable missingness masks cover the noted sensor gaps. (ADR-0002, ADR-0010.)
+  - station_id: "49368"                      # ECCC Pincher Creek (W, ~86 km) — chinook gateway; full coverage
     connector_key: envcanada
-    lat: 49.6303
-    lon: -112.7989
-    elevation_m: 929
-  - station_id: "710547"                   # ACIS: Picture Butte LITE (N).
-    # Reachability CONFIRMED (spike #3): ungated ACIS AIMM daily file works for this LITE station
-    # (short-name `PictureButte`), years 2022-2026, fresh, DAILY-only (no hourly twin on ECCC).
-    connector_key: acis
-    lat: 49.8867                           # CONFIRM exact station coords + elevation (still unverified)
-    lon: -112.78
-    elevation_m: null                      # CONFIRM
-  - station_id: "9883"                     # ACIS: Iron Springs IMCIN (NE)
-    # STALE (spike #3): ungated ACIS AIMM file ends 2023-05-18 (2026 file is header-only); ECCC AGDM
-    # twin 42728 also ends 2023. HISTORY-ONLY (2005-2023) — NOT usable for live.
-    connector_key: acis
-    lat: 49.93                             # CONFIRM 2nd-decimal coords + elevation (gated ACIS API)
-    lon: -112.687
-    elevation_m: null                      # CONFIRM
-  - station_id: "9747"                     # ACIS: Blood Tribe Ag Project IMCIN (SW — foothills convection)
-    connector_key: acis
-    lat: 49.5333
-    lon: -113.05
-    elevation_m: null                      # CONFIRM elevation (gated ACIS API)
+    lat: 49.52
+    lon: -114.00
+    elevation_m: 1190
+  - station_id: "2224"                       # ECCC Claresholm (NW, ~66 km) — NB: no station pressure
+    connector_key: envcanada
+    lat: 50.00
+    lon: -113.64
+    elevation_m: 1009
+  - station_id: "26971"                      # ECCC Cardston (SW, ~64 km) — NB: precip sensor dropped 2026 (temp/RH/wind)
+    connector_key: envcanada
+    lat: 49.20
+    lon: -113.29
+    elevation_m: 1136
+  - station_id: "8804"                       # ECCC Milk River (SE, ~85 km) — full coverage
+    connector_key: envcanada
+    lat: 49.13
+    lon: -112.05
+    elevation_m: 1050
 
-# NB: ungated ACIS is DAILY-only (AIMM climate file); ungated *live hourly* is unavailable for
-# these stations (ECCC AGDM hourly twins are dead, 2023/2024). Architecture pivot is deferred —
-# see docs/spikes/0003-acis-ungated-access.md (spike #3). The acis connector slice (#1) is blocked.
-enabled_sources: [hrdps_geomet, hrdps_caspar, envcanada, acis]
+enabled_sources: [hrdps_geomet, hrdps_caspar, envcanada]
 
 nwp:
   product: hrdps

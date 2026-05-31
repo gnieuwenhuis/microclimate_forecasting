@@ -55,7 +55,8 @@ weather agency**. It corrects an existing official forecast for local bias.
   single validated config file (`config/deployments/<id>.yml`). Identified by a
   **`deployment_id`** (e.g. `lethbridge`). Every artifact, model, and output is namespaced
   by `deployment_id`. The system is **multi-deployment by design**. v1 ships **one**
-  deployment: `lethbridge` (`seeded`), targeting ACIS Demo Farm IMCIN (#9835).
+  deployment: `lethbridge` (`seeded`), targeting ECCC Lethbridge CDA (#2265) — retargeted
+  from ACIS Demo Farm once ACIS proved to have no ungated live-hourly feed (ADR-0010).
 - **Training strategy** — a per-deployment mode. v1 uses only **`seeded`**: all observation
   sources have *deep* historical coverage and training uses the CaSPAr *historical seed* +
   the logger (trainable from day one). A **`cold_start`** mode (live-only target, logger as
@@ -94,13 +95,15 @@ weather agency**. It corrects an existing official forecast for local bias.
   historical coverage** (see *historical coverage*); daily-only sources (CoCoRaHS) and
   live-only sources (CWOP) are ineligible (ADR-0008).
 - **Historical coverage** — a declared, validated capability of each `ObservationSource`:
-  `deep` (multi-year, e.g. Environment Canada, ACIS), `shallow`, or `none` (live-only).
+  `deep` (multi-year, e.g. Environment Canada), `shallow`, or `none` (live-only).
   Depth is explicit and machine-checked, not assumed; only `deep` sources are eligible.
 - **Connector** — the abstraction over a data source. An `NWPSource` or an
   `ObservationSource`; observation connectors implement both historical and live fetch (the
   dual-feed contract) and declare their *historical coverage*.
-- **Available sources** — the free, no-device sources this project uses: **Environment
-  Canada** (SWOB live + historical CSV, deep) and **ACIS** (current + historical, deep).
+- **Available sources** — the free, no-device source this project uses for v1 observations is
+  **Environment Canada** (bulk hourly CSV, deep) — both target and neighbors. **ACIS** was
+  evaluated and **dropped**: its only ungated feed is *daily*, and no ungated *live-hourly*
+  feed exists for its stations (spike #3 / ADR-0010); the connector is retained but unused.
   Consumer-PWS network APIs (Weather Underground, Tempest, Ambient) are device-gated and
   **not used**; CWOP is live-only and therefore ineligible for the (seeded) v1 (ADR-0008).
 - **Precip-occurrence label** — the binary training label for PoP: `1` if observed
@@ -163,10 +166,11 @@ weather agency**. It corrects an existing official forecast for local bias.
   must resolve to the identical variable/grid specification, or seed and logged data
   diverge.
 - **Attribution is mandatory.** Every public, data-bearing artifact carries source
-  attribution: ECCC (`Data Source: Environment and Climate Change Canada`), ACIS
-  (`Data provided by Agriculture and Irrigation, Alberta Climate Information Service (ACIS)`),
-  and CaSPAr (cite Mai et al. 2020). Enumerated in `DATA_LICENSES.md`, embedded in the
-  forecast JSON `attribution` field, and shown in the dashboard footer (ADR-0009).
+  attribution: ECCC (`Data Source: Environment and Climate Change Canada`) and CaSPAr
+  (cite Mai et al. 2020). (ACIS attribution is no longer required for v1 — ACIS is dropped,
+  ADR-0010 — but its licence section is retained in `DATA_LICENSES.md` for the deferred path.)
+  Enumerated in `DATA_LICENSES.md`, embedded in the forecast JSON `attribution` field, and
+  shown in the dashboard footer (ADR-0009).
 - **Guardrails over discipline.** Architectural rules are enforced mechanically (types,
   schemas, CI fitness functions), not by convention — see the scaffolding spec in
   `docs/superpowers/specs/`. Bad structural decisions should fail at construction or in CI.

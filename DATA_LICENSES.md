@@ -23,6 +23,10 @@ footer) must carry the acknowledgments below.
 
 ## ACIS — Alberta Climate Information Service (Agriculture and Irrigation)
 
+> **Not used in v1.** ACIS was dropped after spike #3 showed it has no ungated *live-hourly*
+> feed; the `lethbridge` deployment now uses ECCC observations only (ADR-0010). This section
+> is retained for the deferred path (ACIS as a future daily-feature source).
+
 - **Source:** ACIS station observations (target + neighbors), e.g. Lethbridge Demo Farm
   IMCIN (#9835), Picture Butte LITE (#710547), Iron Springs IMCIN (#9883), Blood Tribe
   IMCIN (#9747).
