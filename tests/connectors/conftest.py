@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pathlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import xarray as xr
@@ -27,10 +27,22 @@ VAR_MAP: Mapping[str, str] = {
 }
 
 
-def build_hrdps_dataset() -> xr.Dataset:
+def build_hrdps_dataset(
+    *,
+    grid_size: tuple[int, int] = (2, 2),
+    lead_hours: Sequence[int] = (0, 1, 2, 3),
+) -> xr.Dataset:
     """Build a small synthetic xr.Dataset that matches the nwp_core Dataset contract.
 
-    Grid layout (y=2, x=2):
+    Args:
+        grid_size:   (ny, nx) shape of the 2-D lat/lon grid.  Default (2, 2)
+                     gives the fixed 4-cell grid used by all existing tests.
+        lead_hours:  Lead hours to include as a coordinate.  Default
+                     ``(0, 1, 2, 3)`` covers the original fixture; Task-B
+                     (issue-6) can pass more hours without duplicating the
+                     fixture builder.
+
+    Grid layout (default grid_size=(2,2)):
         Cell (iy=0, ix=0): lat=51.0, lon=-114.0  ← TARGET cell
         Cell (iy=0, ix=1): lat=51.0, lon=-113.0
         Cell (iy=1, ix=0): lat=52.0, lon=-114.0
@@ -40,7 +52,7 @@ def build_hrdps_dataset() -> xr.Dataset:
         t2m   = 288.15 K  → 15.0 °C after conversion
         d2m   = 278.15 K  → 5.0 °C after conversion
         sp    = 90000 Pa  → 900.0 hPa after conversion
-        tp    = [0.0, 0.5, 2.0, 2.0]  accumulated kg/m²
+        tp    = [0.0, 0.5, 2.0, 2.0, …]  accumulated kg/m²
                 → per-hour at leads [1,2,3]: [0.5, 1.5, 0.0]
         tcc   = 50 %      → 0.5 after conversion
         dswrf = 300 W/m²  → 300.0 (pass-through)
@@ -49,15 +61,21 @@ def build_hrdps_dataset() -> xr.Dataset:
 
     Alternate cell (1,1) has distinct values (e.g. temp=293.15 K → 20.0 °C) so a
     wrong-cell selection causes test failures.
-
-    lead_hour coordinate: [0, 1, 2, 3] (ascending, includes hour-before-first-requested).
     """
-    lead_hours = np.array([0, 1, 2, 3], dtype=np.int64)
-    n_lh = len(lead_hours)
+    ny, nx = grid_size
+    if ny < 2 or nx < 2:
+        raise ValueError("grid_size must be at least (2, 2) for the alternate-cell tests.")
 
-    # 2-D lat/lon arrays over dims (y, x)
-    lat_data = np.array([[51.0, 51.0], [52.0, 52.0]], dtype=np.float64)
-    lon_data = np.array([[-114.0, -113.0], [-114.0, -113.0]], dtype=np.float64)
+    lead_hours_arr = np.array(list(lead_hours), dtype=np.int64)
+    n_lh = len(lead_hours_arr)
+
+    # 2-D lat/lon arrays over dims (y, x): first row lat=51, second lat=52;
+    # first col lon=-114, second col lon=-113.  Extra cells follow the same
+    # stride so cell (0,0) always has the canonical (51, -114) position.
+    lat_vals = np.array([51.0 + i for i in range(ny)], dtype=np.float64)
+    lon_vals = np.array([-114.0 + j for j in range(nx)], dtype=np.float64)
+    lat_data = np.tile(lat_vals[:, np.newaxis], (1, nx))
+    lon_data = np.tile(lon_vals[np.newaxis, :], (ny, 1))
 
     dims_lh_yx = ("lead_hour", "y", "x")
     dims_yx = ("y", "x")
@@ -69,7 +87,7 @@ def build_hrdps_dataset() -> xr.Dataset:
 
     def _fill(target_val: float, other_val: float) -> np.ndarray:
         """Fill array: target cell (0,0)=target_val, all others=other_val."""
-        arr = np.full((n_lh, 2, 2), other_val, dtype=np.float64)
+        arr = np.full((n_lh, ny, nx), other_val, dtype=np.float64)
         arr[:, 0, 0] = target_val
         return arr
 
@@ -82,12 +100,18 @@ def build_hrdps_dataset() -> xr.Dataset:
     # Surface pressure (Pa): 90000 @ target, 95000 @ others
     sp_data = _fill(90000.0, 95000.0)
 
-    # Accumulated precip (kg/m²): target=[0,0.5,2.0,2.0], others=0.0
-    tp_data = np.zeros((n_lh, 2, 2), dtype=np.float64)
-    tp_data[:, 0, 0] = [0.0, 0.5, 2.0, 2.0]
-    tp_data[:, 0, 1] = [0.0, 1.0, 1.0, 1.0]  # distinct from target
-    tp_data[:, 1, 0] = [0.0, 2.0, 2.0, 2.0]  # distinct from target
-    tp_data[:, 1, 1] = [0.0, 3.0, 3.5, 4.0]  # distinct from target
+    # Accumulated precip (kg/m²): target=[0,0.5,2.0,2.0,…], others=0.0.
+    # The target cell gets a linearly increasing accumulation so that any
+    # number of lead hours yields a positive de-accumulated value; the
+    # standard first-four values are pinned for backward compatibility.
+    tp_data = np.zeros((n_lh, ny, nx), dtype=np.float64)
+    pinned = [0.0, 0.5, 2.0, 2.0]
+    for lh_i in range(n_lh):
+        tp_data[lh_i, 0, 0] = pinned[lh_i] if lh_i < len(pinned) else float(lh_i)
+    # Distinct values for other corner cells (2×2 minimum guaranteed above)
+    tp_data[:, 0, 1] = [float(i) for i in range(n_lh)]  # distinct from target
+    tp_data[:, 1, 0] = [float(i * 2) for i in range(n_lh)]  # distinct from target
+    tp_data[:, 1, 1] = [float(i) * 0.5 + float(i) * 0.5 * i for i in range(n_lh)]  # distinct
 
     # Cloud cover (%): 50 @ target, 75 @ others
     tcc_data = _fill(50.0, 75.0)
@@ -102,7 +126,7 @@ def build_hrdps_dataset() -> xr.Dataset:
     wdir10_data = _fill(270.0, 180.0)
 
     coords: dict[str, object] = {
-        "lead_hour": lead_hours,
+        "lead_hour": lead_hours_arr,
         "latitude": xr.DataArray(lat_data, dims=dims_yx),
         "longitude": xr.DataArray(lon_data, dims=dims_yx),
     }

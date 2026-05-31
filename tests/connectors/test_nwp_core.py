@@ -77,28 +77,16 @@ def test_schema_conformance_and_canonical_values() -> None:
     # issue_time column is constant and equals what we passed in
     assert (df["issue_time"] == pd.Timestamp(_ISSUE_TIME)).all()
 
+    # precip: accumulated [0.0, 0.5, 2.0, 2.0] → de-accumulated per-hour
+    # lead 1: 0.5 - 0.0 = 0.5; lead 2: 2.0 - 0.5 = 1.5; lead 3: 2.0 - 2.0 = 0.0
+    assert row1["precip_mm"] == pytest.approx(0.5)  # type: ignore[reportUnknownMemberType]
+    assert row2["precip_mm"] == pytest.approx(1.5)  # type: ignore[reportUnknownMemberType]
+    assert row3["precip_mm"] == pytest.approx(0.0)  # type: ignore[reportUnknownMemberType]
+
 
 # ---------------------------------------------------------------------------
-# 2. Precip de-accumulation
+# 2. Precip de-accumulation edge cases
 # ---------------------------------------------------------------------------
-
-
-def test_precip_deaccumulation_values() -> None:
-    """Accumulated precip [0, 0.5, 2.0, 2.0] → per-hour [0.5, 1.5, 0.0]."""
-    ds = build_hrdps_dataset()
-
-    df = dataset_to_forecast_frame(
-        ds,
-        VAR_MAP,
-        issue_time=_ISSUE_TIME,
-        lat=_TARGET_LAT,
-        lon=_TARGET_LON,
-        lead_hours=[1, 2, 3],
-    )
-
-    assert df[df["lead_hour"] == 1]["precip_mm"].iloc[0] == pytest.approx(0.5)  # type: ignore[reportUnknownMemberType]
-    assert df[df["lead_hour"] == 2]["precip_mm"].iloc[0] == pytest.approx(1.5)  # type: ignore[reportUnknownMemberType]
-    assert df[df["lead_hour"] == 3]["precip_mm"].iloc[0] == pytest.approx(0.0)  # type: ignore[reportUnknownMemberType]
 
 
 def test_precip_negative_diff_clamped_to_zero() -> None:
@@ -239,4 +227,110 @@ def test_missing_prev_hour_for_precip_raises_value_error() -> None:
             lat=_TARGET_LAT,
             lon=_TARGET_LON,
             lead_hours=[1],  # needs lead_hour=0 for precip de-accum
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5. lead_hour < 1 raises ValueError (M-4)
+# ---------------------------------------------------------------------------
+
+
+def test_lead_hour_zero_raises_value_error() -> None:
+    """lead_hour=0 is below the FORECAST_FRAME floor of 1 and must raise ValueError."""
+    ds = build_hrdps_dataset()  # has lead_hours [0, 1, 2, 3]
+
+    with pytest.raises(ValueError, match="out of range"):
+        dataset_to_forecast_frame(
+            ds,
+            VAR_MAP,
+            issue_time=_ISSUE_TIME,
+            lat=_TARGET_LAT,
+            lon=_TARGET_LON,
+            lead_hours=[0],
+        )
+
+
+def test_lead_hour_negative_raises_value_error() -> None:
+    """Negative lead_hour is below FORECAST_FRAME floor and must raise ValueError."""
+    ds = build_hrdps_dataset()
+
+    with pytest.raises(ValueError, match="out of range"):
+        dataset_to_forecast_frame(
+            ds,
+            VAR_MAP,
+            issue_time=_ISSUE_TIME,
+            lat=_TARGET_LAT,
+            lon=_TARGET_LON,
+            lead_hours=[-1],
+        )
+
+
+# ---------------------------------------------------------------------------
+# 6. var_map validation (I-1)
+# ---------------------------------------------------------------------------
+
+
+def test_var_map_missing_canonical_key_raises_value_error() -> None:
+    """var_map without a required canonical key raises ValueError naming the missing key."""
+    ds = build_hrdps_dataset()
+
+    # Drop 'wind_dir_deg' from the map
+    incomplete_map = {k: v for k, v in VAR_MAP.items() if k != "wind_dir_deg"}
+
+    with pytest.raises(ValueError, match="wind_dir_deg"):
+        dataset_to_forecast_frame(
+            ds,
+            incomplete_map,
+            issue_time=_ISSUE_TIME,
+            lat=_TARGET_LAT,
+            lon=_TARGET_LON,
+            lead_hours=[1],
+        )
+
+
+def test_var_map_nonexistent_ds_variable_raises_value_error() -> None:
+    """var_map pointing at a dataset variable that does not exist raises ValueError."""
+    ds = build_hrdps_dataset()
+
+    # Remap 'temp_c' to a variable name that is not in ds
+    bad_map = dict(VAR_MAP)
+    bad_map["temp_c"] = "nonexistent_var"
+
+    with pytest.raises(ValueError, match="nonexistent_var"):
+        dataset_to_forecast_frame(
+            ds,
+            bad_map,
+            issue_time=_ISSUE_TIME,
+            lat=_TARGET_LAT,
+            lon=_TARGET_LON,
+            lead_hours=[1],
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. 2-D grid requirement (I-2)
+# ---------------------------------------------------------------------------
+
+
+def test_1d_lat_lon_raises_value_error() -> None:
+    """1-D latitude/longitude arrays raise ValueError with a clear message."""
+    ds = build_hrdps_dataset()
+
+    # Collapse latitude and longitude to 1-D by selecting a single row
+    lat_1d = ds.coords["latitude"].values[0, :]  # shape (2,) — 1-D
+    lon_1d = ds.coords["longitude"].values[0, :]  # shape (2,) — 1-D
+
+    ds_1d = ds.assign_coords(  # type: ignore[reportUnknownMemberType]
+        latitude=xr.DataArray(lat_1d, dims=("x",)),
+        longitude=xr.DataArray(lon_1d, dims=("x",)),
+    )
+
+    with pytest.raises(ValueError, match="2-D"):
+        dataset_to_forecast_frame(
+            ds_1d,
+            VAR_MAP,
+            issue_time=_ISSUE_TIME,
+            lat=_TARGET_LAT,
+            lon=_TARGET_LON,
+            lead_hours=[1],
         )

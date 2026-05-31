@@ -48,6 +48,20 @@ _KELVIN_OFFSET: float = 273.15
 _PA_TO_HPA: float = 100.0
 _PCT_TO_FRACTION: float = 100.0
 
+# Canonical variable names that every var_map must cover (one entry per
+# FORECAST_FRAME physical column).  Mirrors the _PHYS_VARS pattern used in
+# the envcanada connector.
+_CANONICAL_VARS: tuple[str, ...] = (
+    "temp_c",
+    "dewpoint_c",
+    "surface_pressure_hpa",
+    "precip_mm",
+    "cloud_cover_fraction",
+    "solar_radiation_wm2",
+    "wind_speed_ms",
+    "wind_dir_deg",
+)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -75,6 +89,16 @@ def _nearest_cell(
     """
     lat_arr: np.ndarray = ds.coords["latitude"].values  # type: ignore[reportUnknownMemberType]
     lon_arr_raw: np.ndarray = ds.coords["longitude"].values  # type: ignore[reportUnknownMemberType]
+
+    # I-2: Enforce the 2-D curvilinear grid contract.  A 1-D coordinate would
+    # let np.unravel_index succeed (shape is a 1-tuple) but silently produce a
+    # wrong (iy, ix) unpack; catching it here gives a clear message instead.
+    if lat_arr.ndim != 2 or lon_arr_raw.ndim != 2:
+        raise ValueError(
+            "nwp_core expects 2-D curvilinear latitude/longitude (dims y,x); "
+            f"got ndim={lat_arr.ndim} for latitude and ndim={lon_arr_raw.ndim} "
+            "for longitude."
+        )
     lon_arr: np.ndarray = _norm_lon(lon_arr_raw)  # type: ignore[reportUnknownMemberType]
     lon_target = float(_norm_lon(lon))
 
@@ -95,6 +119,10 @@ def _check_lead_hours_present(
     """
     available: set[int] = set(int(v) for v in ds.coords["lead_hour"].values)
     for h in lead_hours:
+        if h < 1:
+            raise ValueError(
+                f"lead_hour={h} is out of range: FORECAST_FRAME requires lead_hour ≥ 1."
+            )
         if h not in available:
             raise ValueError(
                 f"Requested lead_hour={h} is not present in the dataset. "
@@ -148,34 +176,67 @@ def dataset_to_forecast_frame(
         one row per requested lead hour.
 
     Raises:
-        ValueError: If any requested ``lead_hour`` (or the hour preceding it,
-                    needed for precip de-accumulation) is absent from the dataset.
+        ValueError: If ``var_map`` is missing a canonical key, if a mapped
+                    dataset variable does not exist, or if any requested
+                    ``lead_hour`` (or the hour preceding it, needed for precip
+                    de-accumulation) is absent from the dataset.
     """
     # -----------------------------------------------------------------------
-    # 1. Validate all requested lead hours (and their predecessors) are present
+    # 1. Validate var_map completeness and dataset variable existence (I-1)
+    # -----------------------------------------------------------------------
+    missing_canonical = [k for k in _CANONICAL_VARS if k not in var_map]
+    if missing_canonical:
+        raise ValueError(
+            f"var_map is missing the following canonical key(s): {missing_canonical}. "
+            f"All of {list(_CANONICAL_VARS)} must be present."
+        )
+    missing_ds_vars = [
+        f"{canon!r} → {var_map[canon]!r}" for canon in _CANONICAL_VARS if var_map[canon] not in ds
+    ]
+    if missing_ds_vars:
+        raise ValueError(
+            f"var_map references dataset variable(s) that do not exist in ds: {missing_ds_vars}."
+        )
+
+    # -----------------------------------------------------------------------
+    # 2. Validate all requested lead hours (and their predecessors) are present
     # -----------------------------------------------------------------------
     _check_lead_hours_present(ds, lead_hours)
 
     # -----------------------------------------------------------------------
-    # 2. Find the nearest grid cell
+    # 3. Find the nearest grid cell
     # -----------------------------------------------------------------------
     iy, ix = _nearest_cell(ds, lat, lon)
 
     # -----------------------------------------------------------------------
-    # 3. Extract variables at the nearest cell for each lead hour
+    # 4. Cache all DataArrays once (M-2) and hoist loop-invariant values (M-1)
     # -----------------------------------------------------------------------
+    temp_da = ds[var_map["temp_c"]]
+    dew_da = ds[var_map["dewpoint_c"]]
+    press_da = ds[var_map["surface_pressure_hpa"]]
     precip_da = ds[var_map["precip_mm"]]
+    cloud_da = ds[var_map["cloud_cover_fraction"]]
+    solar_da = ds[var_map["solar_radiation_wm2"]]
+    wspd_da = ds[var_map["wind_speed_ms"]]
+    wdir_da = ds[var_map["wind_dir_deg"]]
 
+    # M-1: issue_utc is loop-invariant; compute it once before the loop.
+    issue_utc = issue_time if issue_time.tzinfo is not None else issue_time.replace(tzinfo=UTC)
+    issue_ts = pd.Timestamp(issue_utc)
+
+    # -----------------------------------------------------------------------
+    # 5. Extract variables at the nearest cell for each lead hour
+    # -----------------------------------------------------------------------
     rows: list[dict[str, object]] = []
     for h in lead_hours:
         # -- Non-precip variables: sample → convert ---------------------
-        temp_k = _sample(ds[var_map["temp_c"]], h, iy, ix)
-        dew_k = _sample(ds[var_map["dewpoint_c"]], h, iy, ix)
-        press_pa = _sample(ds[var_map["surface_pressure_hpa"]], h, iy, ix)
-        cloud_pct = _sample(ds[var_map["cloud_cover_fraction"]], h, iy, ix)
-        solar = _sample(ds[var_map["solar_radiation_wm2"]], h, iy, ix)
-        wspd = _sample(ds[var_map["wind_speed_ms"]], h, iy, ix)
-        wdir = _sample(ds[var_map["wind_dir_deg"]], h, iy, ix)
+        temp_k = _sample(temp_da, h, iy, ix)
+        dew_k = _sample(dew_da, h, iy, ix)
+        press_pa = _sample(press_da, h, iy, ix)
+        cloud_pct = _sample(cloud_da, h, iy, ix)
+        solar = _sample(solar_da, h, iy, ix)
+        wspd = _sample(wspd_da, h, iy, ix)
+        wdir = _sample(wdir_da, h, iy, ix)
 
         # -- Unit conversions ----------------------------------------
         temp_c = temp_k - _KELVIN_OFFSET
@@ -188,13 +249,11 @@ def dataset_to_forecast_frame(
         acc_prev = _sample(precip_da, h - 1, iy, ix)
         precip_mm = max(0.0, acc_h - acc_prev)
 
-        # -- valid_time -----------------------------------------------
-        issue_utc = issue_time if issue_time.tzinfo is not None else issue_time.replace(tzinfo=UTC)
         valid_time = pd.Timestamp(issue_utc + timedelta(hours=h))
 
         rows.append(
             {
-                "issue_time": pd.Timestamp(issue_utc),
+                "issue_time": issue_ts,
                 "lead_hour": h,
                 "valid_time": valid_time,
                 "temp_c": temp_c,
@@ -209,7 +268,7 @@ def dataset_to_forecast_frame(
         )
 
     # -----------------------------------------------------------------------
-    # 4. Build DataFrame and validate against FORECAST_FRAME
+    # 6. Build DataFrame and validate against FORECAST_FRAME
     # -----------------------------------------------------------------------
     df: pd.DataFrame = pd.DataFrame(rows)  # type: ignore[reportUnknownMemberType]
     return FORECAST_FRAME.validate(df)  # type: ignore[reportUnknownMemberType]
