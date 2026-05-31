@@ -33,6 +33,9 @@ hours.
 - Two model artifacts per deployment instead of one; mixed model vintages are possible in a
   single published forecast (acceptable — it enables independent improvement).
 - Training runs on free CPU runners in seconds-to-minutes; no GPU needed.
+- **`predict` is row-based (added 2026-05-31, see ADR-0013):** the wrappers take feature-
+  matrix rows and return one prediction per `(issue_time, lead_hour)` row; the inference
+  pipeline reshapes per-row predictions into the published `{lead_hour: value}` forecast.
 
 ## Alternatives considered
 

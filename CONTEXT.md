@@ -97,6 +97,12 @@ weather agency**. It corrects an existing official forecast for local bias.
   carries **derived features** plus the as-of-`t0` snapshot values broadcast across rows;
   **label-free** (labels are attached downstream). Built at training-read time and at
   inference by the **same** function, so its column set is identical for train and serve.
+- **Labeled feature matrix** — the feature matrix with `label_temp_c` and
+  `label_precip_occurrence` attached (`features.attach_labels`). What the models train on;
+  distinct from the persisted **Training store** schema (raw snapshot + labels, ADR-0012).
+- **Label attachment** / **labeler** — the pure step joining target-station observations at
+  `valid_time` onto the feature matrix to form the labeled feature matrix. The future
+  (post-`issue_time`) read it depends on is done by training-data assembly, never inference.
 - **Derived feature** — a feature computed from raw snapshot values (dewpoint depression,
   pressure tendency, advection, per-lead-hour `valid_hour` encoding), as distinct from a
   passthrough of a raw snapshot value. Derived features are pure functions of the snapshot
@@ -161,6 +167,12 @@ weather agency**. It corrects an existing official forecast for local bias.
   models, evaluates them, and runs the publish gate.
 - **Training store** — the accumulating dataset of feature snapshots + labels: CaSPAr seed
   plus logged snapshots. Partitioned Parquet, per deployment.
+- **Training-data assembly** — `pipelines.training_data`: iterates issue-times through
+  `build_snapshot` → `build_features`, performs the single training-only future read of
+  target observations, and labels the result. The shared seam used by the model-dev notebook
+  and (later) the training pipeline; caches assembled rows to local Parquet.
+- **Model-dev notebook** — the thin, local-only `notebooks/model_dev.py` for training and
+  exploring models. Holds no logic; calls the shared assembly, model, and metric functions.
 - **Forecast JSON** — the single published, schema-versioned output document a deployment
   produces. The only thing thin clients read. Carries an **`attribution`** field (data-source
   acknowledgments) and never embeds raw observations — only derived predictions (ADR-0009).
