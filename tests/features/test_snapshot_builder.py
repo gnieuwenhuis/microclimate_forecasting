@@ -151,3 +151,27 @@ def test_station_not_found_propagates() -> None:
     obs = FakeObs(exc=StationNotFound("bad station id"))
     with pytest.raises(StationNotFound):
         build_snapshot(config, _T0, nwp, {"fake": obs})
+
+
+def test_observations_switch_off_empties_obs_maps() -> None:
+    config = make_config(horizon_hours=2, lag_hours=1, observations=False)
+    nwp = FakeNWP(make_forecast_frame(_T0, [1, 2]))
+    obs = FakeObs(exc=SourceUnavailable("should not be called"))
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+
+    assert snap.observation_features == {}
+    assert snap.observation_masks == {}
+    assert len(snap.nwp_features) == 8 * 2
+    assert len(snap.temporal_features) == 4
+    assert len(snap.static_features) == 3
+
+
+def test_nwp_switch_off_empties_nwp_but_keeps_lead_hours() -> None:
+    config = make_config(horizon_hours=3, lag_hours=0, nwp=False)
+    nwp = FakeNWP(exc=SourceUnavailable("should not be called"))
+    obs = FakeObs(frames={"T1": make_obs_frame("T1", [_T0]), "N1": make_obs_frame("N1", [_T0])})
+    snap = build_snapshot(config, _T0, nwp, {"fake": obs})
+
+    assert snap.nwp_features == {}
+    assert snap.lead_hours == (1, 2, 3)
+    assert len(snap.observation_features) == 2 * 8 * 1
