@@ -88,4 +88,15 @@ def build_features(snapshot: FeatureSnapshot, config: DeploymentConfig) -> pd.Da
         dpd3 = obs.get(f"obs_{tgt}_temp_c_lag3", math.nan) - obs.get(f"obs_{tgt}_dewpoint_c_lag3", math.nan)
         df[f"obs_{tgt}_dpd_tend_3h"] = dpd0 - dpd3
 
+    # --- Static (target only; broadcast). ---
+    for key, value in snapshot.static_features.items():
+        df[key] = value
+
+    # --- Temporal: t0 passthrough (broadcast) + per-lead valid-time hour encoding. ---
+    for key, value in snapshot.temporal_features.items():
+        df[key] = value
+    valid_hours = [(issue + timedelta(hours=h)).hour for h in leads]
+    df["valid_hour_sin"] = [math.sin(2 * math.pi * vh / 24.0) for vh in valid_hours]
+    df["valid_hour_cos"] = [math.cos(2 * math.pi * vh / 24.0) for vh in valid_hours]
+
     return df

@@ -117,3 +117,26 @@ def test_target_tendencies_nan_when_lag3_missing() -> None:
     df = build_features(snap, config)
     assert df["obs_T1_ptend_3h"].isna().all()
     assert df["obs_T1_dpd_tend_3h"].isna().all()
+
+
+def test_static_passthrough() -> None:
+    snap, config = _snapshot(horizon_hours=5)
+    df = build_features(snap, config)
+    assert (df["static_lat"] == 51.0).all()
+    assert (df["static_lon"] == -114.0).all()
+    assert (df["static_elevation_m"] == 900.0).all()
+
+
+def test_t0_temporal_passthrough() -> None:
+    snap, config = _snapshot(horizon_hours=5)
+    df = build_features(snap, config)
+    for key in ("t0_hour_sin", "t0_hour_cos", "t0_doy_sin", "t0_doy_cos"):
+        assert (df[key] == snap.temporal_features[key]).all()
+
+
+def test_valid_hour_encoding_per_lead() -> None:
+    snap, config = _snapshot(horizon_hours=5)
+    df = build_features(snap, config)
+    row = df.loc[df["lead_hour"] == 3].iloc[0]
+    assert row["valid_hour_sin"] == pytest.approx(math.sin(2 * math.pi * 3 / 24.0))
+    assert row["valid_hour_cos"] == pytest.approx(math.cos(2 * math.pi * 3 / 24.0))
