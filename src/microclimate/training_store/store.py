@@ -6,10 +6,11 @@ the training pipeline (ADR-0012), and TRAINING_ROW is the read-time join product
 private-repo git sync (ADR-0009) is a CI/pipeline concern outside this module; in production
 the root is a checkout of the private repo.
 
-Layout (append-only; one Parquet file per write, atomic via temp+os.replace):
-    {root}/snapshots/deployment_id={id}/ym={YYYYMM}/{uuid}.parquet
-    {root}/labels/deployment_id={id}/ym={YYYYMM}/{uuid}.parquet
-Reads dedupe on (issue_time[, lead_hour]) keeping the latest write (by written_at).
+Layout (one coalesced Parquet per partition; grown by read-modify-write, atomic via
+temp+os.replace; deduped at write time):
+    {root}/snapshots/deployment_id={id}/ym={YYYYMM}/data.parquet
+    {root}/labels/deployment_id={id}/ym={YYYYMM}/data.parquet
+The training-data branch is force-pushed as a single state commit (ADR-0017/0018).
 """
 
 from __future__ import annotations
@@ -68,13 +69,29 @@ def _range_bounds(
     return s, e
 
 
-def _atomic_write_parquet(df: pd.DataFrame, partition_dir: Path) -> None:
-    """Write df to a uniquely-named Parquet in partition_dir via temp file + os.replace."""
-    partition_dir.mkdir(parents=True, exist_ok=True)
-    final = partition_dir / f"{uuid.uuid4().hex}.parquet"
-    tmp = partition_dir / f".{uuid.uuid4().hex}.tmp"
+def _atomic_write_parquet(df: pd.DataFrame, dest: Path) -> None:
+    """Atomically write df to the Parquet file ``dest`` (temp in the same dir + os.replace)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.parent / f".{uuid.uuid4().hex}.tmp"
     df.to_parquet(tmp, index=False)  # type: ignore[reportUnknownMemberType]
-    os.replace(tmp, final)
+    os.replace(tmp, dest)
+
+
+def _merge_and_dedupe(
+    dest: Path, new: pd.DataFrame, *, subset: list[str], dt_cols: list[str]
+) -> pd.DataFrame:
+    """Read the existing partition file (if any), append ``new``, normalise ``dt_cols`` to UTC,
+    dedupe on ``subset`` keeping the latest ``written_at``, return sorted by ``subset``."""
+    frames = [pd.read_parquet(dest), new] if dest.exists() else [new]  # type: ignore[reportUnknownMemberType]
+    df = pd.concat(frames, ignore_index=True)  # type: ignore[reportUnknownMemberType]
+    for col in dt_cols:
+        df[col] = pd.to_datetime(df[col], utc=True)
+    return (
+        df.sort_values("written_at")
+        .drop_duplicates(subset=subset, keep="last")
+        .sort_values(subset)
+        .reset_index(drop=True)
+    )
 
 
 class TrainingStore:
@@ -83,12 +100,21 @@ class TrainingStore:
     def __init__(self, root: Path | str) -> None:
         self._root = Path(root)
 
+    def _partition(self, deployment_id: str, issue_time: datetime, kind: str) -> Path:
+        return (
+            self._root
+            / kind
+            / f"deployment_id={deployment_id}"
+            / f"ym={_ym(issue_time)}"
+            / "data.parquet"
+        )
+
     def append_snapshot(
         self, snapshot: FeatureSnapshot, *, written_at: datetime | None = None
     ) -> None:
-        """Append one raw snapshot row, stamped with its schema_version and a write time."""
+        """Append one raw snapshot row into its deployment-month file (read-modify-write)."""
         stamp = _to_utc(written_at) if written_at is not None else _to_utc(datetime.now(UTC))
-        df = pd.DataFrame(
+        new = pd.DataFrame(
             [
                 {
                     "deployment_id": snapshot.deployment_id,
@@ -100,13 +126,20 @@ class TrainingStore:
             ],
             columns=_SNAPSHOT_COLUMNS,
         )
-        pdir = (
-            self._root
-            / "snapshots"
-            / f"deployment_id={snapshot.deployment_id}"
-            / f"ym={_ym(snapshot.issue_time)}"
+        dest = self._partition(snapshot.deployment_id, snapshot.issue_time, "snapshots")
+        merged = _merge_and_dedupe(
+            dest, new, subset=["issue_time"], dt_cols=["issue_time", "written_at"]
         )
-        _atomic_write_parquet(df, pdir)
+        _atomic_write_parquet(merged, dest)
+
+    def has_snapshot(self, deployment_id: str, issue_time: datetime) -> bool:
+        """True if a snapshot for ``issue_time`` is already stored (cheap; reads one month file)."""
+        ts = _to_utc(issue_time)
+        dest = self._partition(deployment_id, ts, "snapshots")
+        if not dest.exists():
+            return False
+        existing = pd.read_parquet(dest, columns=["issue_time"])  # type: ignore[reportUnknownMemberType]
+        return bool((pd.to_datetime(existing["issue_time"], utc=True) == ts).any())
 
     def read_snapshots(
         self,
@@ -117,7 +150,7 @@ class TrainingStore:
         """Return snapshots for the deployment in [start, end], latest-per-issue_time, sorted."""
         start_ts, end_ts = _range_bounds(start, end)
         base = self._root / "snapshots" / f"deployment_id={deployment_id}"
-        files = sorted(base.glob("ym=*/*.parquet")) if base.exists() else []
+        files = sorted(base.glob("ym=*/data.parquet")) if base.exists() else []
         if not files:
             return []
         df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)  # type: ignore[reportUnknownMemberType]
@@ -129,6 +162,7 @@ class TrainingStore:
             df = df[df["issue_time"] <= end_ts]
         if df.empty:
             return []
+        # Files are deduped at write time; this defensive dedupe is cheap insurance.
         df = df.sort_values("written_at").drop_duplicates(subset="issue_time", keep="last")
         bad = sorted(
             str(v)
@@ -171,7 +205,7 @@ class TrainingStore:
         df = df[_LABEL_COLUMNS]
         for ym, part in df.groupby(df["issue_time"].dt.strftime("%Y%m")):  # type: ignore[reportUnknownMemberType]
             pdir = self._root / "labels" / f"deployment_id={deployment_id}" / f"ym={ym}"
-            _atomic_write_parquet(part, pdir)
+            _atomic_write_parquet(part, pdir / "data.parquet")
 
     def read_labels(
         self,

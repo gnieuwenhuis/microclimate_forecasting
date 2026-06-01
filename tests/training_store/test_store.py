@@ -130,3 +130,21 @@ def test_write_labels_missing_column_raises(tmp_path: Path) -> None:
     bad = _labels().drop(columns="valid_time")
     with pytest.raises(ValueError, match="missing required column"):
         store.write_labels("lethbridge", bad)
+
+
+def test_one_data_file_per_month_with_both_rows(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap(issue_time=_T0))
+    store.append_snapshot(_snap(issue_time=_T0 + timedelta(days=2)))  # same month (June)
+    ym_dir = tmp_path / "snapshots" / "deployment_id=lethbridge" / "ym=202606"
+    assert [p.name for p in ym_dir.glob("*.parquet")] == ["data.parquet"]  # exactly one file
+    assert len(store.read_snapshots("lethbridge")) == 2
+
+
+def test_has_snapshot(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    assert store.has_snapshot("lethbridge", _T0) is False
+    store.append_snapshot(_snap(issue_time=_T0))
+    assert store.has_snapshot("lethbridge", _T0) is True
+    assert store.has_snapshot("lethbridge", _T0 + timedelta(hours=1)) is False
+    assert store.has_snapshot("other", _T0) is False
