@@ -77,7 +77,9 @@ def run_inference(
     snapshot = build_snapshot(config, issue_time, nwp, observations)
     matrix = build_features(snapshot, config)
     preds = baseline_predictions(matrix, config.label.precip_occurrence_threshold_mm)
-    doc = _assemble_forecast(config, preds, issue_time, last_updated=issue_time)
+    # Use the snapshot's normalized-UTC issue_time (build_snapshot coerces naive/non-UTC inputs)
+    # so the published document's issue_time matches the UTC valid_times and the logged snapshot.
+    doc = _assemble_forecast(config, preds, snapshot.issue_time, last_updated=snapshot.issue_time)
     write_forecast(doc, forecast_path)
     store.append_snapshot(snapshot)
     return doc
