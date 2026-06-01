@@ -36,12 +36,17 @@ labeled feature matrix), `pipelines.training_data` (training-data assembly + loc
 cache + chronological split — the shared seam, ADR-0013), the two **LightGBM model
 wrappers** (`models.TemperatureRegressor` and `models.PrecipOccurrenceClassifier` with
 isotonic calibration, row-based `predict`), `evaluation.metrics` (per-lead skill vs the
-raw-HRDPS baseline + PoP reliability), and a thin local **model-dev notebook**
-(`notebooks/model_dev.py`).
+raw-HRDPS baseline + PoP reliability), a thin local **model-dev notebook**
+(`notebooks/model_dev.py`), and the **`training_store`** — the per-deployment, path-based,
+partitioned-Parquet store (raw `FeatureSnapshot` blobs + a separate labels table) the logger
+appends to and training reads (ADR-0015).
 
 **Not yet implemented** (currently stubs): the publish gate, forecast-JSON / registry
-publication, the inference/training pipeline orchestration CLIs, and the private
-training-store read/write path (local dev backfills from CaSPAr historical instead).
+publication, the inference/training pipeline orchestration CLIs (incl. the logger that
+appends to the training store), and the training store's **private-repo git sync** (ADR-0009;
+the store itself is path-based and the production sync via token is deferred to the logger
+work). CaSPAr appears unavailable, so v1 pivots to logger-forward accumulation (cold-start,
+ADR-0008) rather than a historical seed.
 
 ## Develop
 

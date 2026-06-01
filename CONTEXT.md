@@ -168,8 +168,11 @@ weather agency**. It corrects an existing official forecast for local bias.
   fully labeled training row exists. Decouples ongoing training from CaSPAr.
 - **Training pipeline** — the job that reads the **training store**, trains temp and PoP
   models, evaluates them, and runs the publish gate.
-- **Training store** — the accumulating dataset of feature snapshots + labels: CaSPAr seed
-  plus logged snapshots. Partitioned Parquet, per deployment.
+- **Training store** — the accumulating per-deployment dataset behind the logger: raw
+  **snapshots** (each `FeatureSnapshot` serialized as a blob + `SNAPSHOT_SCHEMA_VERSION`) plus
+  a separate **labels** table (per `issue_time`×`lead_hour`, written once obs land). Partitioned
+  Parquet, append-only, path-based (a private-repo checkout in production, ADR-0009/0015). The
+  store is raw-only — `TRAINING_ROW` is the read-time join (snapshot → `build_features` → labels).
 - **Training-data assembly** — `pipelines.training_data`: iterates issue-times through
   `build_snapshot` → `build_features`, performs the single training-only future read of
   target observations, and labels the result. The shared seam used by the model-dev notebook
