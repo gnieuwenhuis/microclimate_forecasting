@@ -26,7 +26,8 @@ Dataset contract (the seam normalises raw GRIB2 to this):
         longitude  — 2-D float over dims (y, x); may be 0–360 or −180..180 —
                      normalised before distance comparison.
     Data variables:
-        Named by HRDPS GRIB shortNames; referenced through the caller-supplied
+        Named by whatever the connector's seam produces (canonical names for Datamart;
+        CaSPAr netCDF names for CaSPAr); referenced through the caller-supplied
         ``var_map`` (canonical name → dataset variable name).
 """
 
@@ -166,7 +167,7 @@ def dataset_to_forecast_frame(
                      2-D ``latitude``/``longitude`` coordinates over dims (y, x).
         var_map:     Mapping from each of the 8 canonical column names
                      (``temp_c``, ``dewpoint_c``, …) to the dataset variable that
-                     supplies it (HRDPS GRIB shortName).
+                     supplies it (the seam's variable name).
         issue_time:  UTC-aware model run initialisation time.
         lat:         Target latitude (decimal degrees).
         lon:         Target longitude (decimal degrees; either convention).
