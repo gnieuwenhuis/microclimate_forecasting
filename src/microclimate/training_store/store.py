@@ -204,8 +204,20 @@ class TrainingStore:
         df["written_at"] = stamp
         df = df[_LABEL_COLUMNS]
         for ym, part in df.groupby(df["issue_time"].dt.strftime("%Y%m")):  # type: ignore[reportUnknownMemberType]
-            pdir = self._root / "labels" / f"deployment_id={deployment_id}" / f"ym={ym}"
-            _atomic_write_parquet(part, pdir / "data.parquet")
+            dest = (
+                self._root
+                / "labels"
+                / f"deployment_id={deployment_id}"
+                / f"ym={ym}"
+                / "data.parquet"
+            )
+            merged = _merge_and_dedupe(
+                dest,
+                part,
+                subset=["issue_time", "lead_hour"],
+                dt_cols=["issue_time", "valid_time", "written_at"],
+            )
+            _atomic_write_parquet(merged, dest)
 
     def read_labels(
         self,
@@ -217,7 +229,7 @@ class TrainingStore:
         start_ts, end_ts = _range_bounds(start, end)
         public_cols = [c for c in _LABEL_COLUMNS if c != "written_at"]
         base = self._root / "labels" / f"deployment_id={deployment_id}"
-        files = sorted(base.glob("ym=*/*.parquet")) if base.exists() else []
+        files = sorted(base.glob("ym=*/data.parquet")) if base.exists() else []
         if not files:
             return pd.DataFrame(columns=public_cols)
         df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)  # type: ignore[reportUnknownMemberType]

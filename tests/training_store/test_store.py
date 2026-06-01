@@ -148,3 +148,13 @@ def test_has_snapshot(tmp_path: Path) -> None:
     assert store.has_snapshot("lethbridge", _T0) is True
     assert store.has_snapshot("lethbridge", _T0 + timedelta(hours=1)) is False
     assert store.has_snapshot("other", _T0) is False
+
+
+def test_one_label_data_file_per_month(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.write_labels("lethbridge", _labels(_T0), written_at=_T0)
+    store.write_labels("lethbridge", _labels(_T0 + timedelta(days=1)), written_at=_T0)  # same month
+    ym_dir = tmp_path / "labels" / "deployment_id=lethbridge" / "ym=202606"
+    assert [p.name for p in ym_dir.glob("*.parquet")] == ["data.parquet"]
+    out = store.read_labels("lethbridge")
+    assert len(out) == 6  # two issue_times × 3 leads
