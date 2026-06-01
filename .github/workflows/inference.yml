@@ -10,7 +10,12 @@ name: inference
 # `permissions: contents: write`.
 on:
   schedule:
-    - cron: "0 * * * *"
+    # Twice hourly at off-peak minutes (NOT ":00"). GitHub queues/sheds scheduled events under
+    # load, and the top of the hour is the worst slot — empirically ~55% of our ":00" hourly
+    # runs were dropped and the rest started 11-58 min late. Off-peak minutes are dropped far
+    # less, and running twice an hour means even with drops we reliably capture each HRDPS
+    # 6-hourly cycle (00/06/12/18Z); idempotent logging makes the redundant runs cheap no-ops.
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 # Serialize runs so two of them never push the training-data branch at once.
