@@ -14,7 +14,10 @@ import pytest
 import microclimate.connectors  # noqa: F401  # type: ignore[reportUnusedImport]  (populates registry)
 from microclimate.connectors.base import ForecastUnavailable, SourceUnavailable
 from microclimate.connectors.registry import get_source, is_registered
-from microclimate.connectors.sources.hrdps_datamart import HrdpsDatamartSource
+from microclimate.connectors.sources.hrdps_datamart import (
+    HrdpsDatamartSource,
+    _coord_and_download_leads,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
+)
 from microclimate.contracts.forecast_frame import FORECAST_FRAME
 
 from .conftest import build_hrdps_dataset
@@ -33,6 +36,21 @@ def _make_source() -> HrdpsDatamartSource:
     """Return an HrdpsDatamartSource with a hermetic opener returning a synthetic Dataset."""
     ds = build_hrdps_dataset(lead_hours=(0, 1, 2, 3))
     return HrdpsDatamartSource(opener=lambda _issue, _leads: ds)
+
+
+# ---------------------------------------------------------------------------
+# 0. Pure helper: coord vs download lead computation
+# ---------------------------------------------------------------------------
+
+
+def test_coord_and_download_leads() -> None:
+    """Hour-0 baseline is in coord_leads but NOT downloaded; real baselines are downloaded."""
+    # [1, 2] → baseline hour 0 is synthesized (no APCP PT000H), so excluded from downloads.
+    assert _coord_and_download_leads([1, 2]) == ([0, 1, 2], [1, 2])
+    # [5, 6] → baseline 4 is a real published file → must be downloaded.
+    assert _coord_and_download_leads([5, 6]) == ([4, 5, 6], [4, 5, 6])
+    # single requested lead 1 → coords include 0, downloads only 1.
+    assert _coord_and_download_leads([1]) == ([0, 1], [1])
 
 
 # ---------------------------------------------------------------------------

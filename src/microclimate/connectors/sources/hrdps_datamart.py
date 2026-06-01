@@ -25,6 +25,14 @@ Live layout (verified 2026-05-31, real Datamart run):
     ``unknown`` (e.g. APCP/TCDC), so ``_open_latest_run`` selects the sole data
     var rather than indexing by shortName, names it by the canonical key, and
     hands nwp_core an identity var_map.
+
+Hour-0 accumulation baseline:
+  The de-accumulation baseline for a request whose smallest lead is 1 is hour 0.
+  MSC Datamart does NOT publish an ``APCP`` ``PT000H`` file, so hour 0 is never
+  downloaded; it is synthesized as a zero-filled layer (accumulated fields are 0
+  at run start by definition, and non-accumulated fields are never sampled at the
+  baseline by nwp_core). When the smallest lead is > 1 the baseline is a real
+  published hour and IS downloaded. See ``_coord_and_download_leads``.
 """
 
 from __future__ import annotations
@@ -72,6 +80,21 @@ _IDENTITY_VAR_MAP: dict[str, str] = {canon: canon for canon in HRDPS_VAR_MAP}
 # ---------------------------------------------------------------------------
 
 
+def _coord_and_download_leads(lead_hours: Sequence[int]) -> tuple[list[int], list[int]]:
+    """(coord_leads, download_leads) for a request.
+
+    coord_leads = requested hours plus the de-accumulation baseline (min−1, ≥0) — the lead
+    set the assembled Dataset must contain. download_leads excludes hour 0, which is the
+    run-start accumulation baseline: accumulated fields (precip/solar) are 0 there by
+    definition and MSC Datamart does not publish an APCP PT000H file, so hour 0 is
+    synthesized as zeros rather than downloaded.
+    """
+    min_lh = min(lead_hours)
+    coord_leads = sorted({max(0, min_lh - 1), *lead_hours})
+    download_leads = [lh for lh in coord_leads if lh >= 1]
+    return coord_leads, download_leads
+
+
 def _build_datamart_url(issue_time: datetime, lead_hour: int, var: str, level: str) -> str:
     """Build the (verified) MSC Datamart HRDPS continental 2.5 km GRIB2 URL.
 
@@ -99,7 +122,10 @@ def _open_latest_run(
 
     The Dataset returned conforms to the nwp_core contract:
         - 1-D integer ``lead_hour`` coordinate (ascending, includes the hour
-          before the smallest requested hour for precip de-accumulation).
+          before the smallest requested hour for precip de-accumulation). When
+          that baseline is hour 0 it is synthesized as a zero accumulation
+          baseline rather than downloaded (MSC Datamart publishes no APCP
+          PT000H file); see ``_coord_and_download_leads``.
         - 2-D ``latitude`` / ``longitude`` coordinates over dims (y, x).
         - Data variables named by their CANONICAL column names (see
           ``HRDPS_VAR_MAP`` keys); each single-variable file's sole data var is
@@ -127,9 +153,12 @@ def _open_latest_run(
     except ImportError as exc:
         raise SourceUnavailable("cfgrib is not importable (eccodes binary unavailable)") from exc
 
-    # Build the full set of lead hours (include h-1 for precip de-accumulation).
-    min_lh = min(lead_hours)
-    all_lead_hours = sorted({max(0, min_lh - 1), *lead_hours})
+    # coord_leads = requested hours + the de-accumulation baseline (min-1, >=0); this is the
+    # lead set the assembled Dataset must contain. download_leads excludes hour 0 — at run
+    # start an accumulated field (APCP precip, DSWRF solar) is 0 by definition, AND MSC
+    # Datamart does NOT publish an APCP PT000H file, so hour 0 is synthesized as zeros below
+    # rather than downloaded (downloading it would 404 → SourceUnavailable).
+    coord_leads, download_leads = _coord_and_download_leads(lead_hours)
 
     # Download one GRIB2 file per (lead_hour, canonical var) combination.
     # Each MSC single-variable file lives at its own Datamart URL.
@@ -139,9 +168,9 @@ def _open_latest_run(
     # After combining into the final Dataset we call .load() to materialise the
     # data into memory BEFORE the directory is deleted — cfgrib reads lazily.
     with tempfile.TemporaryDirectory() as tmpdir:
-        # {lead_hour: {canonical_var: DataArray}}
+        # {lead_hour: {canonical_var: DataArray}} — only for downloaded (>=1) leads.
         per_lh: dict[int, dict[str, xr.DataArray]] = {}
-        for lh in all_lead_hours:
+        for lh in download_leads:
             per_lh[lh] = {}
             for canon, (var, level) in HRDPS_VAR_MAP.items():
                 url = _build_datamart_url(issue_time, lh, var, level)
@@ -174,22 +203,28 @@ def _open_latest_run(
                 per_lh[lh][canon] = ds_single[names[0]]
 
         # Combine into a single Dataset with a lead_hour dimension.
-        # Extract spatial shape from the first DataArray.
-        first_da = next(iter(per_lh[all_lead_hours[0]].values()))
+        # download_leads is always non-empty (requested leads are >=1), so derive the spatial
+        # shape from the first downloaded lead.
+        first_da = next(iter(per_lh[download_leads[0]].values()))
         spatial_dims: tuple[str, ...] = tuple(str(d) for d in first_da.dims)  # type: ignore[reportUnknownMemberType]
         spatial_shape: tuple[int, ...] = tuple(int(s) for s in first_da.shape)  # type: ignore[reportUnknownMemberType]
 
         # Build combined arrays of shape (lead_hour, y, x), named by canonical key.
+        # For any coord lead NOT downloaded (i.e. hour 0, the run-start accumulation baseline),
+        # synthesize a zero-filled spatial layer rather than indexing a missing download.
         data_vars: dict[str, xr.DataArray] = {}
         for canon in HRDPS_VAR_MAP:
-            stacked: np.ndarray = np.stack(  # type: ignore[reportUnknownMemberType]
-                [per_lh[lh][canon].values for lh in all_lead_hours],  # type: ignore[reportUnknownMemberType]
-                axis=0,
-            )
+            layers: list[np.ndarray] = [
+                per_lh[lh][canon].values  # type: ignore[reportUnknownMemberType]
+                if lh in per_lh
+                else np.zeros(spatial_shape)
+                for lh in coord_leads
+            ]
+            stacked: np.ndarray = np.stack(layers, axis=0)  # type: ignore[reportUnknownMemberType]
             data_vars[canon] = xr.DataArray(stacked, dims=("lead_hour", *spatial_dims))
 
-        # Extract latitude/longitude from the first DataArray's coordinates.
-        first_var_da = per_lh[all_lead_hours[0]][next(iter(HRDPS_VAR_MAP))]
+        # Extract latitude/longitude from a downloaded DataArray's coordinates.
+        first_var_da = per_lh[download_leads[0]][next(iter(HRDPS_VAR_MAP))]
         lat_vals: xr.DataArray
         lon_vals: xr.DataArray
         if "latitude" in first_var_da.coords and "longitude" in first_var_da.coords:  # type: ignore[reportUnknownMemberType]
@@ -216,7 +251,7 @@ def _open_latest_run(
                 "cannot normalise to nwp_core Dataset contract."
             )
 
-        lh_coord = xr.DataArray(np.array(all_lead_hours, dtype=np.int64), dims=("lead_hour",))
+        lh_coord = xr.DataArray(np.array(coord_leads, dtype=np.int64), dims=("lead_hour",))
         coords: dict[str, object] = {
             "lead_hour": lh_coord,
             "latitude": lat_vals,
