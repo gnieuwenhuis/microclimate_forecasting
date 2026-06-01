@@ -130,3 +130,61 @@ def test_write_labels_missing_column_raises(tmp_path: Path) -> None:
     bad = _labels().drop(columns="valid_time")
     with pytest.raises(ValueError, match="missing required column"):
         store.write_labels("lethbridge", bad)
+
+
+def test_one_data_file_per_month_with_both_rows(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap(issue_time=_T0))
+    store.append_snapshot(_snap(issue_time=_T0 + timedelta(days=2)))  # same month (June)
+    ym_dir = tmp_path / "snapshots" / "deployment_id=lethbridge" / "ym=202606"
+    assert [p.name for p in ym_dir.glob("*.parquet")] == ["data.parquet"]  # exactly one file
+    assert len(store.read_snapshots("lethbridge")) == 2
+
+
+def test_appends_in_two_months_split_into_two_files(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap(issue_time=_T0))  # June
+    store.append_snapshot(_snap(issue_time=_T0 + timedelta(days=40)))  # July
+    base = tmp_path / "snapshots" / "deployment_id=lethbridge"
+    assert sorted(p.name for p in base.glob("ym=*")) == ["ym=202606", "ym=202607"]
+    assert len(store.read_snapshots("lethbridge")) == 2
+
+
+def test_partition_month_uses_utc_so_has_snapshot_agrees(tmp_path: Path) -> None:
+    from datetime import timezone
+
+    # A tz-aware issue_time whose UTC value falls in the *previous* month: local July 1 02:00+05:00
+    # is 2026-06-30 21:00 UTC. The write path and has_snapshot must agree on ym=202606.
+    store = TrainingStore(tmp_path)
+    local = datetime(2026, 7, 1, 2, 0, tzinfo=timezone(timedelta(hours=5)))
+    store.append_snapshot(_snap(issue_time=local))
+    ym_dir = tmp_path / "snapshots" / "deployment_id=lethbridge" / "ym=202606"
+    assert [p.name for p in ym_dir.glob("*.parquet")] == ["data.parquet"]  # written under UTC month
+    assert store.has_snapshot("lethbridge", local) is True  # idempotent skip still fires
+
+
+def test_has_snapshot(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    assert store.has_snapshot("lethbridge", _T0) is False
+    store.append_snapshot(_snap(issue_time=_T0))
+    assert store.has_snapshot("lethbridge", _T0) is True
+    assert store.has_snapshot("lethbridge", _T0 + timedelta(hours=1)) is False
+    assert store.has_snapshot("other", _T0) is False
+
+
+def test_has_snapshot_ignores_stale_schema_rows(tmp_path: Path) -> None:
+    # A stale-schema row must NOT count as present, else inference would silently skip
+    # re-collecting it and the store would stay unreadable (read_snapshots raises on it).
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap(issue_time=_T0).model_copy(update={"schema_version": "9.9.9"}))
+    assert store.has_snapshot("lethbridge", _T0) is False
+
+
+def test_one_label_data_file_per_month(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.write_labels("lethbridge", _labels(_T0), written_at=_T0)
+    store.write_labels("lethbridge", _labels(_T0 + timedelta(days=1)), written_at=_T0)  # same month
+    ym_dir = tmp_path / "labels" / "deployment_id=lethbridge" / "ym=202606"
+    assert [p.name for p in ym_dir.glob("*.parquet")] == ["data.parquet"]
+    out = store.read_labels("lethbridge")
+    assert len(out) == 6  # two issue_times × 3 leads

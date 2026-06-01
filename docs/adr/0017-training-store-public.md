@@ -24,8 +24,10 @@ data, redistributable with attribution).
 ## Consequences
 
 - Zero-setup hourly data collection (no private repo, no PAT/secret).
-- The `training-data` branch grows by one commit/hour; periodic compaction/prune is future
-  work (consistent with ADR-0015's small-file note).
+- The inference Action manages the `training-data` branch as **state**: it force-pushes a
+  single commit of the current store each run (not accumulating append commits), keeping git
+  history bounded. The branch is derived, forward-regenerable data; provenance is in each row
+  (`issue_time`/`written_at`), not git history (ADR-0018).
 - Training (subsystem 3) reads the `training-data` branch.
 - ADR-0007's "fourth artifact home" reverts to the public `training-data` branch it originally
   described; ADR-0009's private-store consequence is superseded for the ECCC-only deployment.

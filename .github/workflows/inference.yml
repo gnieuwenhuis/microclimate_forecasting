@@ -1,11 +1,13 @@
 name: inference
 # Hourly: build each deployment's HRDPS snapshot, publish the baseline forecast (discarded for
-# now — gh-pages publish is a follow-on), and append the snapshot to the PUBLIC training-data
-# branch (ADR-0017). Runbook: trigger via "Run workflow" (workflow_dispatch) or wait for the
-# top-of-hour cron; data lands on the `training-data` branch under
-# snapshots/deployment_id=<id>/ym=YYYYMM/*.parquet (the branch root is the `store` checkout,
-# so committed paths drop the local `store/` prefix). First run bootstraps the orphan
-# branch. Needs Actions write permission — declared below via `permissions: contents: write`.
+# now — gh-pages publish is a follow-on), and write the snapshot to the PUBLIC training-data
+# branch (ADR-0017, ADR-0018). Runbook: trigger via "Run workflow" (workflow_dispatch) or wait
+# for the top-of-hour cron; data lands on the `training-data` branch under
+# snapshots/deployment_id=<id>/ym=YYYYMM/data.parquet (one coalesced file per deployment-month;
+# the branch root is the `store` checkout, so committed paths drop the local `store/` prefix).
+# The branch is force-pushed as a single state commit each run — history stays bounded (ADR-0018).
+# First run bootstraps the orphan branch. Needs Actions write permission — declared below via
+# `permissions: contents: write`.
 on:
   schedule:
     - cron: "0 * * * *"
@@ -59,16 +61,20 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Commit & push new snapshots to training-data
+      - name: Force-push the store state to training-data
         run: |
           set -euo pipefail
           cd store
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No new store files; nothing to commit."
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No store changes; nothing to push."
           else
-            git commit -q -m "data: snapshots $(date -u +%FT%TZ)"
-            git push origin HEAD:training-data
+            # The training-data branch is derived state (provenance is in the rows), so replace
+            # its history with a single commit of the current store — keeps git size bounded
+            # despite read-modify-write rewrites (ADR-0018).
+            git checkout -q --orphan _state
+            git add -A
+            git commit -q -m "data: store snapshot $(date -u +%FT%TZ)"
+            git push -q --force origin _state:training-data
           fi

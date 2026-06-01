@@ -2,6 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-31
+
+> **Revised by ADR-0018:** the store now coalesces to one `data.parquet` per deployment-month
+> via read-modify-write with write-time dedupe (not append-only `<uuid>.parquet` + read-time
+> dedupe), and the "compaction is future work" note is resolved (coalescing is the compaction).
+
 - **Relates to:** ADR-0007 (logger → accumulating store), ADR-0009 (private raw store,
   token-written), ADR-0012 (store holds raw snapshots; build_features is read-time).
 
