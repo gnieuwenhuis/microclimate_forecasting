@@ -46,6 +46,28 @@ def _ym(ts: datetime) -> str:
     return ts.strftime("%Y%m")
 
 
+def _to_utc(ts: datetime) -> pd.Timestamp:
+    """Normalize a datetime to a UTC pandas Timestamp (tz-aware → convert; naive → assume UTC).
+
+    Matches the connectors' naive-is-UTC convention and keeps the store's stored/compared
+    times unambiguously UTC, so dedupe ordering and range filtering never hit a tz-naive
+    vs tz-aware comparison error.
+    """
+    t = pd.Timestamp(ts)
+    return t.tz_localize("UTC") if t.tz is None else t.tz_convert("UTC")  # type: ignore[reportUnknownMemberType]
+
+
+def _range_bounds(
+    start: datetime | None, end: datetime | None
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """Normalize [start, end] to UTC Timestamps and require start <= end when both are given."""
+    s = _to_utc(start) if start is not None else None
+    e = _to_utc(end) if end is not None else None
+    if s is not None and e is not None and s > e:
+        raise ValueError(f"start {s.isoformat()} is after end {e.isoformat()}")
+    return s, e
+
+
 def _atomic_write_parquet(df: pd.DataFrame, partition_dir: Path) -> None:
     """Write df to a uniquely-named Parquet in partition_dir via temp file + os.replace."""
     partition_dir.mkdir(parents=True, exist_ok=True)
@@ -65,7 +87,7 @@ class TrainingStore:
         self, snapshot: FeatureSnapshot, *, written_at: datetime | None = None
     ) -> None:
         """Append one raw snapshot row, stamped with its schema_version and a write time."""
-        stamp = written_at if written_at is not None else datetime.now(UTC)
+        stamp = _to_utc(written_at) if written_at is not None else _to_utc(datetime.now(UTC))
         df = pd.DataFrame(
             [
                 {
@@ -73,7 +95,7 @@ class TrainingStore:
                     "issue_time": pd.Timestamp(snapshot.issue_time),
                     "schema_version": snapshot.schema_version,
                     "snapshot_json": snapshot.model_dump_json(),
-                    "written_at": pd.Timestamp(stamp),
+                    "written_at": stamp,
                 }
             ],
             columns=_SNAPSHOT_COLUMNS,
@@ -93,6 +115,7 @@ class TrainingStore:
         end: datetime | None = None,
     ) -> list[FeatureSnapshot]:
         """Return snapshots for the deployment in [start, end], latest-per-issue_time, sorted."""
+        start_ts, end_ts = _range_bounds(start, end)
         base = self._root / "snapshots" / f"deployment_id={deployment_id}"
         files = sorted(base.glob("ym=*/*.parquet")) if base.exists() else []
         if not files:
@@ -100,10 +123,10 @@ class TrainingStore:
         df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)  # type: ignore[reportUnknownMemberType]
         df["issue_time"] = pd.to_datetime(df["issue_time"], utc=True)
         df["written_at"] = pd.to_datetime(df["written_at"], utc=True)
-        if start is not None:
-            df = df[df["issue_time"] >= pd.Timestamp(start)]
-        if end is not None:
-            df = df[df["issue_time"] <= pd.Timestamp(end)]
+        if start_ts is not None:
+            df = df[df["issue_time"] >= start_ts]
+        if end_ts is not None:
+            df = df[df["issue_time"] <= end_ts]
         if df.empty:
             return []
         df = df.sort_values("written_at").drop_duplicates(subset="issue_time", keep="last")
@@ -129,13 +152,22 @@ class TrainingStore:
         `labels` must carry: issue_time, lead_hour, valid_time, label_temp_c,
         label_precip_occurrence. Written later than the snapshot, once obs at valid_time land.
         """
-        stamp = written_at if written_at is not None else datetime.now(UTC)
+        required = {
+            "issue_time",
+            "lead_hour",
+            "valid_time",
+            "label_temp_c",
+            "label_precip_occurrence",
+        }
+        missing = required - set(labels.columns)
+        if missing:
+            raise ValueError(f"labels is missing required column(s): {sorted(missing)}")
+        stamp = _to_utc(written_at) if written_at is not None else _to_utc(datetime.now(UTC))
         df = labels.copy()
         df["deployment_id"] = deployment_id
         df["issue_time"] = pd.to_datetime(df["issue_time"], utc=True)
         df["valid_time"] = pd.to_datetime(df["valid_time"], utc=True)
-        df["written_at"] = pd.Timestamp(stamp)
-        df["written_at"] = pd.to_datetime(df["written_at"], utc=True)
+        df["written_at"] = stamp
         df = df[_LABEL_COLUMNS]
         for ym, part in df.groupby(df["issue_time"].dt.strftime("%Y%m")):  # type: ignore[reportUnknownMemberType]
             pdir = self._root / "labels" / f"deployment_id={deployment_id}" / f"ym={ym}"
@@ -148,6 +180,7 @@ class TrainingStore:
         end: datetime | None = None,
     ) -> pd.DataFrame:
         """Return labels for the deployment in [start, end], latest-per-(issue_time, lead_hour)."""
+        start_ts, end_ts = _range_bounds(start, end)
         public_cols = [c for c in _LABEL_COLUMNS if c != "written_at"]
         base = self._root / "labels" / f"deployment_id={deployment_id}"
         files = sorted(base.glob("ym=*/*.parquet")) if base.exists() else []
@@ -157,10 +190,10 @@ class TrainingStore:
         df["issue_time"] = pd.to_datetime(df["issue_time"], utc=True)
         df["valid_time"] = pd.to_datetime(df["valid_time"], utc=True)
         df["written_at"] = pd.to_datetime(df["written_at"], utc=True)
-        if start is not None:
-            df = df[df["issue_time"] >= pd.Timestamp(start)]
-        if end is not None:
-            df = df[df["issue_time"] <= pd.Timestamp(end)]
+        if start_ts is not None:
+            df = df[df["issue_time"] >= start_ts]
+        if end_ts is not None:
+            df = df[df["issue_time"] <= end_ts]
         df = df.sort_values("written_at").drop_duplicates(
             subset=["issue_time", "lead_hour"], keep="last"
         )

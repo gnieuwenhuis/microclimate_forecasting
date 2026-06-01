@@ -107,3 +107,26 @@ def test_labels_dedupe_keeps_latest(tmp_path: Path) -> None:
     store.write_labels("lethbridge", revised, written_at=_T0 + timedelta(hours=1))
     out = store.read_labels("lethbridge")
     assert list(out["label_temp_c"]) == [20.0, 21.0, 22.0]
+
+
+def test_read_accepts_naive_and_non_utc_bounds(tmp_path: Path) -> None:
+    from datetime import timezone
+
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap())  # issue_time = _T0 (2026-06-01 00:00 UTC)
+    naive = datetime(2026, 5, 31, 23, 0)  # tz-naive → assumed UTC
+    plus5 = datetime(2026, 6, 1, 6, 0, tzinfo=timezone(timedelta(hours=5)))  # = 01:00 UTC
+    assert len(store.read_snapshots("lethbridge", start=naive, end=plus5)) == 1
+
+
+def test_read_rejects_start_after_end(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    with pytest.raises(ValueError, match="after end"):
+        store.read_snapshots("lethbridge", start=_T0 + timedelta(days=1), end=_T0)
+
+
+def test_write_labels_missing_column_raises(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    bad = _labels().drop(columns="valid_time")
+    with pytest.raises(ValueError, match="missing required column"):
+        store.write_labels("lethbridge", bad)
