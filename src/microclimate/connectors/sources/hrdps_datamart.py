@@ -289,7 +289,11 @@ class HrdpsDatamartSource(NWPSource):
                 if the core rejects the dataset (e.g. missing lead hour needed
                 for precip de-accumulation).
         """
-        issue_utc = issue_time if issue_time.tzinfo is not None else issue_time.replace(tzinfo=UTC)
+        issue_utc = (
+            issue_time.astimezone(UTC)
+            if issue_time.tzinfo is not None
+            else issue_time.replace(tzinfo=UTC)
+        )
         # The opener raises SourceUnavailable (infra) or ForecastUnavailable
         # (absent/truncated run); BOTH propagate unchanged — do NOT re-wrap
         # SourceUnavailable here.

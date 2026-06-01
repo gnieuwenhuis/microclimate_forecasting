@@ -6,7 +6,7 @@ build_hrdps_dataset — no cfgrib, no network.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -197,27 +197,73 @@ def test_registry_hrdps_geomet_is_not_registered() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 4. Network smoke test (deselected in normal CI via addopts="-m 'not network'")
+# 4. UTC normalization (Part B — tz-aware non-UTC issue_time is normalized)
+# ---------------------------------------------------------------------------
+
+
+def test_tz_aware_non_utc_issue_time_is_normalized_to_utc() -> None:
+    """A tz-aware non-UTC issue_time must be normalized to its UTC equivalent.
+
+    A +05:00 issue_time at 05:00 local = 00:00 UTC.  The returned frame's
+    issue_time column must equal the UTC-equivalent timestamp, not the local
+    wall-clock time.
+    """
+    from datetime import timedelta
+
+    tz_plus5 = timezone(timedelta(hours=5))
+    # 2026-05-31 05:00 +05:00 == 2026-05-31 00:00 UTC
+    issue_plus5 = datetime(2026, 5, 31, 5, 0, 0, tzinfo=tz_plus5)
+    expected_utc = datetime(2026, 5, 31, 0, 0, 0, tzinfo=UTC)
+
+    source = _make_source()
+    df = source.fetch_forecast(issue_time=issue_plus5, lat=_LAT, lon=_LON, lead_hours=[1])
+    # issue_time column is datetime64[ns, UTC]; compare as pd.Timestamp
+    assert df["issue_time"].iloc[0] == pd.Timestamp(expected_utc)
+
+
+# ---------------------------------------------------------------------------
+# 5. Network integration test (deselected in normal CI via addopts="-m 'not network'")
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.network
-def test_network_smoke_open_latest_run() -> None:  # pragma: no cover
-    """Smoke test: hit the real MSC Datamart to verify the seam is reachable.
+def test_network_live_datamart_forecast_frame() -> None:  # pragma: no cover
+    """Live: fetch the latest HRDPS run from MSC Datamart for the Lethbridge point.
 
-    This test is skipped in hermetic environments (eccodes/network unavailable).
-    It is only meant to be run manually when eccodes is available and network
-    access to dd.weather.gc.ca is confirmed.
-
-    NOTE: URL patterns and GRIB shortNames in _open_latest_run are unverified
-    against live Datamart data — this test may fail until those are confirmed.
+    Deselected by default (network marker). Requires eccodes + network to dd.weather.gc.ca.
+    Dynamically finds the most recent published run (publish lag ~3-4 h) so it doesn't pin a
+    run that has rolled off Datamart's recent window.
     """
-    from microclimate.connectors.sources.hrdps_datamart import (
-        _open_latest_run,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
-    )
+    import urllib.request
+    from datetime import timedelta
 
-    issue = datetime(2026, 5, 30, 0, 0, tzinfo=UTC)
-    ds = _open_latest_run(issue, [1, 2])
-    assert "lead_hour" in ds.coords
-    assert "latitude" in ds.coords
-    assert "longitude" in ds.coords
+    from microclimate.connectors.sources.hrdps_datamart import (
+        _build_datamart_url,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
+    )
+    from microclimate.contracts.forecast_frame import FORECAST_FRAME
+
+    # Find the latest run whose lead-1 TMP file exists.
+    now = datetime.now(UTC)
+    issue: datetime | None = None
+    for hours_back in range(0, 36):
+        t = now - timedelta(hours=hours_back)
+        if t.hour not in (0, 6, 12, 18):
+            continue
+        url = _build_datamart_url(t, 1, "TMP", "AGL-2m")
+        req = urllib.request.Request(url, method="HEAD")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                if resp.status == 200:
+                    issue = t.replace(minute=0, second=0, microsecond=0)
+                    break
+        except Exception:  # noqa: BLE001 — any network/HTTP error: try an earlier run
+            continue
+    if issue is None:
+        pytest.skip("No recent HRDPS run reachable on Datamart")
+
+    df = HrdpsDatamartSource().fetch_forecast(issue, lat=49.70, lon=-112.77, lead_hours=[1, 2])
+    FORECAST_FRAME.validate(df)
+    assert list(df["lead_hour"]) == [1, 2]
+    assert df["temp_c"].between(-60, 60).all()
+    assert df["cloud_cover_fraction"].between(0, 1).all()
+    assert df["solar_radiation_wm2"].between(0, 1500).all()
