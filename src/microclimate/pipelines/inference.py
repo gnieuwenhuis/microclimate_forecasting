@@ -91,8 +91,11 @@ def run_inference(
     store: TrainingStore,
     forecast_path: Path,
     issue_time: datetime,
-) -> ForecastDocument:
-    """Build a snapshot → baseline forecast → write JSON → log the snapshot. Returns the doc."""
+) -> ForecastDocument | None:
+    """Build a snapshot → baseline forecast → write JSON → log the snapshot. Returns the doc,
+    or None if this issue_time is already in the store (idempotent skip — no fetch/publish)."""
+    if store.has_snapshot(config.deployment_id, issue_time):
+        return None
     snapshot = build_snapshot(config, issue_time, nwp, observations)
     matrix = build_features(snapshot, config)
     preds = baseline_predictions(matrix, config.label.precip_occurrence_threshold_mm)
@@ -116,7 +119,7 @@ def main() -> None:
     store = TrainingStore(Path(os.environ.get("TRAINING_STORE_ROOT", "training-store")))
     issue_time = _latest_hrdps_issue_time(datetime.now(UTC))
 
-    run_inference(
+    doc = run_inference(
         config,
         nwp=nwp,
         observations=observations,
@@ -124,6 +127,8 @@ def main() -> None:
         forecast_path=Path(config.output.forecast_json),
         issue_time=issue_time,
     )
+    if doc is None:
+        print(f"Already collected snapshot for issue_time={issue_time.isoformat()}; skipped.")
 
 
 if __name__ == "__main__":
