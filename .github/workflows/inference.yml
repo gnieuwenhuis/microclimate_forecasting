@@ -1,8 +1,9 @@
 name: inference
-# Hourly: build each deployment's HRDPS snapshot, publish the baseline forecast (discarded for
-# now — gh-pages publish is a follow-on), and write the snapshot to the PUBLIC training-data
-# branch (ADR-0017, ADR-0018). Runbook: trigger via "Run workflow" (workflow_dispatch) or wait
-# for the top-of-hour cron; data lands on the `training-data` branch under
+# Twice hourly (off-peak :07/:37, see the schedule note below): build each deployment's HRDPS
+# snapshot, publish the baseline forecast (discarded for now — gh-pages publish is a follow-on),
+# and write the snapshot to the PUBLIC training-data branch (ADR-0017, ADR-0018). Runbook:
+# trigger via "Run workflow" (workflow_dispatch) or wait for the next scheduled run; data lands
+# on the `training-data` branch under
 # snapshots/deployment_id=<id>/ym=YYYYMM/data.parquet (one coalesced file per deployment-month;
 # the branch root is the `store` checkout, so committed paths drop the local `store/` prefix).
 # The branch is force-pushed as a single state commit each run — history stays bounded (ADR-0018).
