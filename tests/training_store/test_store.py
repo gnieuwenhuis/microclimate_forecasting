@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
@@ -65,3 +66,44 @@ def test_schema_version_mismatch_raises(tmp_path: Path) -> None:
     store.append_snapshot(_snap().model_copy(update={"schema_version": "9.9.9"}))
     with pytest.raises(ValueError, match="schema_version"):
         store.read_snapshots("lethbridge")
+
+
+def _labels(issue_time: datetime = _T0) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "issue_time": pd.to_datetime([issue_time] * 3, utc=True),
+            "lead_hour": [1, 2, 3],
+            "valid_time": pd.to_datetime(
+                [issue_time + timedelta(hours=h) for h in (1, 2, 3)], utc=True
+            ),
+            "label_temp_c": [10.0, 11.0, 12.0],
+            "label_precip_occurrence": pd.array([1, 0, 1], dtype="Int64"),
+        }
+    )
+
+
+def test_write_then_read_labels_round_trips(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.write_labels("lethbridge", _labels())
+    out = store.read_labels("lethbridge")
+    assert list(out["lead_hour"]) == [1, 2, 3]
+    assert list(out["label_temp_c"]) == [10.0, 11.0, 12.0]
+    assert list(out["label_precip_occurrence"].astype("Int64")) == [1, 0, 1]
+    assert "deployment_id" in out.columns
+    assert "written_at" not in out.columns  # internal bookkeeping not surfaced
+
+
+def test_read_labels_unknown_deployment_is_empty(tmp_path: Path) -> None:
+    out = TrainingStore(tmp_path).read_labels("nope")
+    assert out.empty
+    assert "lead_hour" in out.columns
+
+
+def test_labels_dedupe_keeps_latest(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.write_labels("lethbridge", _labels(), written_at=_T0)
+    revised = _labels()
+    revised["label_temp_c"] = [20.0, 21.0, 22.0]
+    store.write_labels("lethbridge", revised, written_at=_T0 + timedelta(hours=1))
+    out = store.read_labels("lethbridge")
+    assert list(out["label_temp_c"]) == [20.0, 21.0, 22.0]
