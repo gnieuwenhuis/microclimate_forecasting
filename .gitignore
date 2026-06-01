@@ -17,3 +17,4 @@ __pycache__/
 # Notebook (local model-dev)
 notebooks/_artifacts/
 notebooks/*.ipynb
+.claude/scheduled_tasks.lock

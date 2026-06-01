@@ -1,7 +1,7 @@
 # Training store coalescing — one file per month, read-modify-write (store revision)
 
 - **Date:** 2026-05-31
-- **Status:** Approved (brainstorming) — pending implementation plan
+- **Status:** Implemented — accepted as ADR-0018 (this spec is the design record behind it)
 - **Revises:** ADR-0015 (append-only-uuid + read-time dedupe → coalesced read-modify-write).
 - **Relates to:** ADR-0007/0008 (logger), ADR-0017 (public training-data branch), the
   `TrainingStore`, `pipelines.inference.run_inference`, and `.github/workflows/inference.yml`.

@@ -172,6 +172,14 @@ def test_has_snapshot(tmp_path: Path) -> None:
     assert store.has_snapshot("other", _T0) is False
 
 
+def test_has_snapshot_ignores_stale_schema_rows(tmp_path: Path) -> None:
+    # A stale-schema row must NOT count as present, else inference would silently skip
+    # re-collecting it and the store would stay unreadable (read_snapshots raises on it).
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap(issue_time=_T0).model_copy(update={"schema_version": "9.9.9"}))
+    assert store.has_snapshot("lethbridge", _T0) is False
+
+
 def test_one_label_data_file_per_month(tmp_path: Path) -> None:
     store = TrainingStore(tmp_path)
     store.write_labels("lethbridge", _labels(_T0), written_at=_T0)

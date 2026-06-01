@@ -135,13 +135,23 @@ class TrainingStore:
         _atomic_write_parquet(merged, dest)
 
     def has_snapshot(self, deployment_id: str, issue_time: datetime) -> bool:
-        """True if a snapshot for ``issue_time`` is already stored (cheap; reads one month file)."""
+        """True if a *current-schema* snapshot for ``issue_time`` is already stored (cheap; reads
+        one month file).
+
+        A row whose ``schema_version`` differs from the current one does NOT count as present, so
+        a re-collected snapshot overwrites it (write-time dedupe keeps the latest ``written_at``)
+        instead of being silently skipped. This keeps the idempotent skip consistent with
+        ``read_snapshots``' fail-on-mismatch contract and makes a schema bump self-healing.
+        """
         ts = _to_utc(issue_time)
         dest = self._partition(deployment_id, ts, "snapshots")
         if not dest.exists():
             return False
-        existing = pd.read_parquet(dest, columns=["issue_time"])  # type: ignore[reportUnknownMemberType]
-        return bool((pd.to_datetime(existing["issue_time"], utc=True) == ts).any())
+        existing = pd.read_parquet(dest, columns=["issue_time", "schema_version"])  # type: ignore[reportUnknownMemberType]
+        match = (pd.to_datetime(existing["issue_time"], utc=True) == ts) & (
+            existing["schema_version"] == SNAPSHOT_SCHEMA_VERSION
+        )
+        return bool(match.any())
 
     def read_snapshots(
         self,
