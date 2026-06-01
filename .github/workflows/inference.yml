@@ -1,5 +1,5 @@
 name: inference
-# Twice hourly (off-peak :07/:37, see the schedule note below): build each deployment's HRDPS
+# Hourly at :23 (off-peak, see the schedule note below): build each deployment's HRDPS
 # snapshot, publish the baseline forecast (discarded for now — gh-pages publish is a follow-on),
 # and write the snapshot to the PUBLIC training-data branch (ADR-0017, ADR-0018). Runbook:
 # trigger via "Run workflow" (workflow_dispatch) or wait for the next scheduled run; data lands
@@ -11,12 +11,14 @@ name: inference
 # `permissions: contents: write`.
 on:
   schedule:
-    # Twice hourly at off-peak minutes (NOT ":00"). GitHub queues/sheds scheduled events under
-    # load, and the top of the hour is the worst slot — empirically ~55% of our ":00" hourly
-    # runs were dropped and the rest started 11-58 min late. Off-peak minutes are dropped far
-    # less, and running twice an hour means even with drops we reliably capture each HRDPS
-    # 6-hourly cycle (00/06/12/18Z); idempotent logging makes the redundant runs cheap no-ops.
-    - cron: "7,37 * * * *"
+    # Hourly at :23 (NOT ":00"). GitHub queues/sheds scheduled events under load, and the top of
+    # the hour is the worst slot — empirically ~55% of our ":00" runs were dropped and the rest
+    # started 11-58 min late. An off-peak minute is dropped far less often. NOTE: GitHub's hosted
+    # cron is best-effort and can blackout for hours regardless of minute; if reliable cadence
+    # becomes critical, drive this via an external scheduler hitting the workflow_dispatch API.
+    # Capturing each HRDPS 6-hourly cycle (00/06/12/18Z) only needs one success per ~6h window;
+    # idempotent logging makes any redundant runs cheap no-ops.
+    - cron: "23 * * * *"
   workflow_dispatch:
 
 # Serialize runs so two of them never push the training-data branch at once.
