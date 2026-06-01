@@ -1,8 +1,13 @@
 # 9. Public surface is derived products only; raw data store is private
 
-- **Status:** Accepted
+- **Status:** Accepted — **store-is-private decision superseded by ADR-0017**
 - **Date:** 2026-05-30
 - **Amends:** ADR-0003 (storage homes), ADR-0007 (training store location)
+
+> **Amendment (ADR-0017):** the raw store is now **public** (a `training-data` branch in the
+> main repo), not a private repo. ADR-0009's private-store decision was driven by ACIS, which
+> ADR-0010 dropped; the store now holds only ECCC-redistributable data (attribution still
+> required). The `DATA_REPO_TOKEN` / separate-private-repo machinery below is retired.
 
 ## Context
 

@@ -174,7 +174,8 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **Training store** — the accumulating per-deployment dataset behind the logger: raw
   **snapshots** (each `FeatureSnapshot` serialized as a blob + `SNAPSHOT_SCHEMA_VERSION`) plus
   a separate **labels** table (per `issue_time`×`lead_hour`, written once obs land). Partitioned
-  Parquet, append-only, path-based (a private-repo checkout in production, ADR-0009/0015). The
+  Parquet, append-only, path-based; persisted to a **public `training-data` branch** committed
+  by the hourly inference Action (ADR-0017, amending ADR-0009 now that ACIS is dropped). The
   store is raw-only — `TRAINING_ROW` is the read-time join (snapshot → `build_features` → labels).
 - **Training-data assembly** — `pipelines.training_data`: iterates issue-times through
   `build_snapshot` → `build_features`, performs the single training-only future read of
