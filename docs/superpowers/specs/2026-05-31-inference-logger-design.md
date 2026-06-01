@@ -74,7 +74,7 @@ construction (Pydantic), so writing the model is the validation boundary.
 
 ```python
 def run_inference(
-    deployment_id: str,
+    config: DeploymentConfig,        # injected (refinement: see note below) — not a deployment_id
     *,
     nwp: NWPSource,
     observations: Mapping[str, ObservationSource],
@@ -83,6 +83,11 @@ def run_inference(
     issue_time: datetime,
 ) -> ForecastDocument
 ```
+
+> **Refinement (settled in the plan):** `run_inference` takes an injected `DeploymentConfig`
+> rather than a `deployment_id` + internal `load_deployment` — cleaner to test (fake config +
+> fake sources) and consistent with `build_snapshot`/`build_features`. `main()` does the
+> `load_deployment(args.deployment)` and passes the config.
 Flow:
 1. `config = load_deployment(deployment_id)`.
 2. `snapshot = build_snapshot(config, issue_time, nwp, observations)`.
