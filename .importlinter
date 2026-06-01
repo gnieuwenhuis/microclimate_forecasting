@@ -6,6 +6,7 @@ name = Layered architecture (L0 lowest -> L6 highest)
 type = layers
 layers =
     microclimate.pipelines
+    microclimate.training_store
     microclimate.publication
     microclimate.models
     microclimate.evaluation
