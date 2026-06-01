@@ -6,6 +6,10 @@ from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
+# Version of the published forecast-document contract; the cross-client compatibility key
+# (ADR-0003). Bump when the document's shape/meaning changes.
+FORECAST_SCHEMA_VERSION: str = "1.0.0"
+
 
 class ForecastStep(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -151,6 +151,9 @@ weather agency**. It corrects an existing official forecast for local bias.
   predictions.
 - **Baseline** / **raw HRDPS** — the unmodified HRDPS forecast at the target. The floor a
   model must beat to justify the project's existence.
+- **Baseline forecaster** — the raw-HRDPS forecaster published before a trained model exists
+  (ADR-0016): temperature passthrough + threshold PoP. The initial champion and the floor a
+  trained model must beat; `model_versions` marks it `"baseline"`.
 - **Skill score** — a metric expressing improvement over a baseline (e.g. MAE skill for
   temp, **Brier Skill Score** for PoP), reported **per lead hour**.
 - **Champion / challenger** — the model-promotion model: a freshly trained model
