@@ -26,6 +26,11 @@ single as-of feature path shared by training and inference (ADR-0011) — and
 `features.build_features` — the read-time transform from a `FeatureSnapshot` to the feature
 matrix (derived features + explode-to-per-lead-hour rows, ADR-0012).
 
+The live MSC Datamart HRDPS connector (`hrdps_datamart`) is verified against real GRIB2
+(run 2026-05-31 18Z): date-partitioned URL layout, canonical MSC variable codes, sole-data-var
+decode. `nwp_core` solar is de-accumulated from J/m² accumulated to mean W/m² per hour
+(ADR-0014), shared by both HRDPS connectors.
+
 Additionally implemented: `features.attach_labels` (the pure label-attachment step →
 labeled feature matrix), `pipelines.training_data` (training-data assembly + local Parquet
 cache + chronological split — the shared seam, ADR-0013), the two **LightGBM model
