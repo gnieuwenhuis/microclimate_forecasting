@@ -37,9 +37,10 @@ def _latest_hrdps_issue_time(now: datetime) -> datetime:
 
     HRDPS runs four times daily; Datamart publishes each run ~3-4 h after its init time.
     Subtracting the publish lag then flooring to the 6-hourly cycle yields a run that should
-    be available. If a chosen run is still unpublished, ``build_snapshot`` raises
-    ``ForecastUnavailable`` and the next hourly Action run retries; the training store dedupes
-    a re-logged ``issue_time`` (ADR-0015), so hourly re-runs are idempotent.
+    be available. If a chosen run is still unpublished, ``build_snapshot`` propagates the
+    connector error (``SourceUnavailable`` on a 404, or ``ForecastUnavailable``) and the next
+    hourly Action run retries; the training store dedupes a re-logged ``issue_time`` (ADR-0015),
+    so hourly re-runs are idempotent.
     """
     t = (
         now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)

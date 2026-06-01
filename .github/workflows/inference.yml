@@ -3,7 +3,8 @@ name: inference
 # now — gh-pages publish is a follow-on), and append the snapshot to the PUBLIC training-data
 # branch (ADR-0017). Runbook: trigger via "Run workflow" (workflow_dispatch) or wait for the
 # top-of-hour cron; data lands on the `training-data` branch under
-# store/snapshots/deployment_id=<id>/ym=YYYYMM/*.parquet. First run bootstraps the orphan
+# snapshots/deployment_id=<id>/ym=YYYYMM/*.parquet (the branch root is the `store` checkout,
+# so committed paths drop the local `store/` prefix). First run bootstraps the orphan
 # branch. Needs Actions write permission — declared below via `permissions: contents: write`.
 on:
   schedule:

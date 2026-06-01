@@ -120,7 +120,7 @@ This subsystem is workflow YAML + git/shell, validated by **running** it, not by
 
 - **Operator step (gate):** after merge, trigger the workflow via `workflow_dispatch` and
   confirm (a) the job is green, (b) eccodes/cfgrib import passes, (c) a commit appears on the
-  `training-data` branch containing `store/snapshots/deployment_id=lethbridge/ym=YYYYMM/*.parquet`.
+  `training-data` branch containing `snapshots/deployment_id=lethbridge/ym=YYYYMM/*.parquet`.
   This requires live network to MSC Datamart + ECCC from the GitHub runner (both public).
 - No new Python ⇒ no new unit tests; existing coverage (`run_inference` integration test +
   the `network`-marked Datamart test) stands. Optionally lint the workflow with `actionlint`

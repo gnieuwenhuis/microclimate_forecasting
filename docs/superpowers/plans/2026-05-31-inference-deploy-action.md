@@ -259,7 +259,7 @@ data, redistributable with attribution).
 
 - [ ] **Step 4: Update `CONTEXT.md` "Training store" term** — change "path-based (a private-repo checkout in production, ADR-0009/0015)" to "path-based; persisted to a **public `training-data` branch** committed by the hourly inference Action (ADR-0017)".
 
-- [ ] **Step 5: Add a runbook** — append a short "Running the inference Action" subsection to `README.md` (or a comment block atop `inference.yml`): how to trigger (`workflow_dispatch`), where data lands (`training-data` branch, `store/snapshots/deployment_id=…/ym=…`), the first-run orphan-branch bootstrap, and that the repo needs Actions **read/write** permission (the workflow declares `permissions: contents: write`, which suffices on a public repo with default settings).
+- [ ] **Step 5: Add a runbook** — append a short "Running the inference Action" subsection to `README.md` (or a comment block atop `inference.yml`): how to trigger (`workflow_dispatch`), where data lands (`training-data` branch, `snapshots/deployment_id=…/ym=…` (the `store/` prefix is the runner path; the branch root is the store checkout)), the first-run orphan-branch bootstrap, and that the repo needs Actions **read/write** permission (the workflow declares `permissions: contents: write`, which suffices on a public repo with default settings).
 
 - [ ] **Step 6: Full gate + commit**
 
@@ -284,7 +284,7 @@ gh pr create --fill --base main
   1. In the repo's Actions tab, run the **inference** workflow via `workflow_dispatch` (or wait for the top-of-hour cron).
   2. Confirm the job is green (eccodes/cfgrib import OK; live Datamart + ECCC fetch OK).
   3. Confirm a commit appears on the **`training-data`** branch containing
-     `store/snapshots/deployment_id=lethbridge/ym=YYYYMM/*.parquet`.
+     `snapshots/deployment_id=lethbridge/ym=YYYYMM/*.parquet`.
   4. Re-run once and confirm it appends (and the store dedupe keeps the latest re-logged `issue_time`).
   - If the run 404s on HRDPS, the chosen run wasn't published yet — the next hour retries; if it persists, tune `_HRDPS_PUBLISH_LAG`.
 
