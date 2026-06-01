@@ -23,9 +23,10 @@ from microclimate.connectors.sources.hrdps_caspar import (
     _open_caspar_file,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
     _resolve_existing_archive,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
 )
-from microclimate.connectors.sources.hrdps_datamart import HRDPS_VAR_MAP, HrdpsDatamartSource
+from microclimate.connectors.sources.hrdps_datamart import HrdpsDatamartSource
 from microclimate.contracts.forecast_frame import FORECAST_FRAME
 
+from .conftest import VAR_MAP as DATAMART_IDENTITY_VAR_MAP
 from .conftest import build_hrdps_dataset
 
 # ---------------------------------------------------------------------------
@@ -280,12 +281,13 @@ def test_extension_resolution_grib2_preferred_over_nc(tmp_path: Path) -> None:
 def test_no_train_serve_skew(tmp_path: Path) -> None:
     """Both connectors through the shared core must produce frame-equal DataFrames.
 
-    This is the key anti-skew assertion: HRDPS_VAR_MAP and CASPAR_VAR_MAP use
-    different variable names, but the same underlying values flow through the
-    same dataset_to_forecast_frame core.  Both DataFrames must be equal.
+    This is the key anti-skew assertion: the Datamart connector names its vars
+    canonically (identity var_map) while CASPAR_VAR_MAP uses CaSPAr netCDF names,
+    but the same underlying values flow through the same dataset_to_forecast_frame
+    core.  Both DataFrames must be equal.
     """
     # Build two datasets with IDENTICAL underlying values, different variable names.
-    ds_dm = build_hrdps_dataset(var_map=HRDPS_VAR_MAP, lead_hours=(0, 1, 2, 3))
+    ds_dm = build_hrdps_dataset(var_map=DATAMART_IDENTITY_VAR_MAP, lead_hours=(0, 1, 2, 3))
     ds_cp = build_hrdps_dataset(var_map=CASPAR_VAR_MAP, lead_hours=(0, 1, 2, 3))
 
     # Create the archive file so CaSPAr path resolution succeeds.

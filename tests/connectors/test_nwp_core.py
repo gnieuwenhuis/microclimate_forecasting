@@ -66,8 +66,8 @@ def test_schema_conformance_and_canonical_values() -> None:
     assert row1["wind_dir_deg"] == pytest.approx(270.0)  # type: ignore[reportUnknownMemberType]
     # wind speed: 5.0 m/s (pass-through)
     assert row1["wind_speed_ms"] == pytest.approx(5.0)  # type: ignore[reportUnknownMemberType]
-    # solar: 300 W/m² (pass-through)
-    assert row1["solar_radiation_wm2"] == pytest.approx(300.0)  # type: ignore[reportUnknownMemberType]
+    # solar: fixture accum J/m² [0.0, 3_600_000, …] → lead 1 = (3.6e6-0)/3600 = 1000.0 W/m²
+    assert row1["solar_radiation_wm2"] == pytest.approx(1000.0)  # type: ignore[reportUnknownMemberType]
 
     # valid_time = issue_time + lead_hour
     for _row, lh in zip([row1, row2, row3], [1, 2, 3], strict=True):
@@ -308,7 +308,49 @@ def test_var_map_nonexistent_ds_variable_raises_value_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7. 2-D grid requirement (I-2)
+# 7. Solar de-accumulation (J/m² → mean W/m²)
+# ---------------------------------------------------------------------------
+
+
+def test_solar_is_de_accumulated_to_mean_wm2() -> None:
+    ds = build_hrdps_dataset(lead_hours=(0, 1, 2))
+    solar_var = VAR_MAP["solar_radiation_wm2"]
+    # Accumulated downward shortwave (J/m²) at the target cell (0,0): run-total.
+    # h0=0, h1=3_600_000, h2=5_400_000  → per-hour mean flux: h1=1000 W/m², h2=500 W/m².
+    ds[solar_var].values[0, 0, 0] = 0.0
+    ds[solar_var].values[1, 0, 0] = 3_600_000.0
+    ds[solar_var].values[2, 0, 0] = 5_400_000.0
+
+    out = dataset_to_forecast_frame(
+        ds,
+        VAR_MAP,
+        issue_time=datetime(2026, 5, 31, 0, tzinfo=UTC),
+        lat=51.0,
+        lon=-114.0,
+        lead_hours=[1, 2],
+    ).set_index("lead_hour")
+    assert out.loc[1, "solar_radiation_wm2"] == 1000.0
+    assert out.loc[2, "solar_radiation_wm2"] == 500.0
+
+
+def test_solar_clamps_negative_to_zero() -> None:
+    ds = build_hrdps_dataset(lead_hours=(0, 1))
+    solar_var = VAR_MAP["solar_radiation_wm2"]
+    ds[solar_var].values[0, 0, 0] = 5_000.0  # h0 accumulation > h1 (e.g. reset/noise)
+    ds[solar_var].values[1, 0, 0] = 0.0
+    out = dataset_to_forecast_frame(
+        ds,
+        VAR_MAP,
+        issue_time=datetime(2026, 5, 31, 0, tzinfo=UTC),
+        lat=51.0,
+        lon=-114.0,
+        lead_hours=[1],
+    )
+    assert out["solar_radiation_wm2"].iloc[0] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 8. 2-D grid requirement (I-2)
 # ---------------------------------------------------------------------------
 
 
