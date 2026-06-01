@@ -141,6 +141,28 @@ def test_one_data_file_per_month_with_both_rows(tmp_path: Path) -> None:
     assert len(store.read_snapshots("lethbridge")) == 2
 
 
+def test_appends_in_two_months_split_into_two_files(tmp_path: Path) -> None:
+    store = TrainingStore(tmp_path)
+    store.append_snapshot(_snap(issue_time=_T0))  # June
+    store.append_snapshot(_snap(issue_time=_T0 + timedelta(days=40)))  # July
+    base = tmp_path / "snapshots" / "deployment_id=lethbridge"
+    assert sorted(p.name for p in base.glob("ym=*")) == ["ym=202606", "ym=202607"]
+    assert len(store.read_snapshots("lethbridge")) == 2
+
+
+def test_partition_month_uses_utc_so_has_snapshot_agrees(tmp_path: Path) -> None:
+    from datetime import timezone
+
+    # A tz-aware issue_time whose UTC value falls in the *previous* month: local July 1 02:00+05:00
+    # is 2026-06-30 21:00 UTC. The write path and has_snapshot must agree on ym=202606.
+    store = TrainingStore(tmp_path)
+    local = datetime(2026, 7, 1, 2, 0, tzinfo=timezone(timedelta(hours=5)))
+    store.append_snapshot(_snap(issue_time=local))
+    ym_dir = tmp_path / "snapshots" / "deployment_id=lethbridge" / "ym=202606"
+    assert [p.name for p in ym_dir.glob("*.parquet")] == ["data.parquet"]  # written under UTC month
+    assert store.has_snapshot("lethbridge", local) is True  # idempotent skip still fires
+
+
 def test_has_snapshot(tmp_path: Path) -> None:
     store = TrainingStore(tmp_path)
     assert store.has_snapshot("lethbridge", _T0) is False

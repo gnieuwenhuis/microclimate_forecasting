@@ -1,4 +1,4 @@
-"""Append-only, partitioned-Parquet training store.
+"""Coalesced, partitioned-Parquet training store.
 
 Persists raw FeatureSnapshots (serialized to a JSON blob) and a separate labels table under a
 root directory. Dumb: no feature derivation — build_features is a read-time transform owned by
@@ -101,11 +101,13 @@ class TrainingStore:
         self._root = Path(root)
 
     def _partition(self, deployment_id: str, issue_time: datetime, kind: str) -> Path:
+        # Normalize to UTC before deriving the ym= month so the write path and has_snapshot
+        # always agree on the partition, even when a tz offset crosses a month boundary.
         return (
             self._root
             / kind
             / f"deployment_id={deployment_id}"
-            / f"ym={_ym(issue_time)}"
+            / f"ym={_ym(_to_utc(issue_time))}"
             / "data.parquet"
         )
 
