@@ -44,14 +44,17 @@ appends to and training reads (ADR-0015), the **raw-HRDPS baseline forecaster**
 (ADR-0016), `publication.write_forecast` — atomic forecast-JSON writer, and
 `pipelines.inference.run_inference` — builds a snapshot, produces the baseline forecast,
 writes the `ForecastDocument` JSON, and appends the snapshot to the training store
-(in-process, ADR-0016).
+(in-process, ADR-0016) — and the **hourly inference GitHub Action**
+(`.github/workflows/inference.yml`) that runs it per deployment and **persists the snapshots
+to the public `training-data` branch** via `GITHUB_TOKEN` (ADR-0017) — so data collection is
+live with no external setup.
 
 **Not yet implemented** (currently stubs): the registry/champion-loading (trained model
 promotion via champion/challenger, ADR-0006), the publish gate, the training pipeline
-orchestration CLI, and the training store's **private-repo + gh-pages git sync** (the GitHub
-Action, ADR-0009; the store itself is path-based and the production sync via token is deferred
-to a follow-on spec). CaSPAr appears unavailable, so v1 pivots to logger-forward accumulation
-(cold-start, ADR-0008) rather than a historical seed.
+orchestration CLI, and the **gh-pages forecast-JSON publish** (the public live-service surface
+— the Action collects data but does not yet publish the forecast). CaSPAr appears unavailable,
+so v1 pivots to logger-forward accumulation (cold-start, ADR-0008) rather than a historical
+seed; the raw store is **public** (`training-data` branch, ADR-0017 amending ADR-0009).
 
 ## Develop
 

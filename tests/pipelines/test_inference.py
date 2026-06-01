@@ -72,3 +72,26 @@ def test_run_inference_normalizes_naive_issue_time_to_utc(tmp_path: Path) -> Non
     assert doc.issue_time == _T0
     assert doc.issue_time.tzinfo is not None
     assert doc.series[0].valid_time == _T0 + timedelta(hours=1)
+
+
+def test_latest_hrdps_issue_time_floors_to_published_6h_cycle() -> None:
+    from microclimate.pipelines.inference import (
+        _latest_hrdps_issue_time,  # type: ignore[reportPrivateUsage]
+    )
+
+    # 14:00Z minus ~4h publish lag = 10:00Z → floor to the 06Z run
+    assert _latest_hrdps_issue_time(datetime(2026, 6, 1, 14, 0, tzinfo=UTC)) == datetime(
+        2026, 6, 1, 6, 0, tzinfo=UTC
+    )
+    # 16:30Z − 4h = 12:30Z → 12Z run
+    assert _latest_hrdps_issue_time(datetime(2026, 6, 1, 16, 30, tzinfo=UTC)) == datetime(
+        2026, 6, 1, 12, 0, tzinfo=UTC
+    )
+    # 03:00Z − 4h = previous day 23:00Z → 18Z run (day rollover)
+    assert _latest_hrdps_issue_time(datetime(2026, 6, 1, 3, 0, tzinfo=UTC)) == datetime(
+        2026, 5, 31, 18, 0, tzinfo=UTC
+    )
+    # naive input is treated as UTC
+    assert _latest_hrdps_issue_time(datetime(2026, 6, 1, 14, 0)) == datetime(
+        2026, 6, 1, 6, 0, tzinfo=UTC
+    )

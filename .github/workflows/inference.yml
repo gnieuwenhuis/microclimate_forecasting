@@ -1,31 +1,74 @@
 name: inference
+# Hourly: build each deployment's HRDPS snapshot, publish the baseline forecast (discarded for
+# now — gh-pages publish is a follow-on), and append the snapshot to the PUBLIC training-data
+# branch (ADR-0017). Runbook: trigger via "Run workflow" (workflow_dispatch) or wait for the
+# top-of-hour cron; data lands on the `training-data` branch under
+# snapshots/deployment_id=<id>/ym=YYYYMM/*.parquet (the branch root is the `store` checkout,
+# so committed paths drop the local `store/` prefix). First run bootstraps the orphan
+# branch. Needs Actions write permission — declared below via `permissions: contents: write`.
 on:
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
 
-jobs:
-  discover:
-    runs-on: ubuntu-latest
-    outputs:
-      deployments: ${{ steps.list.outputs.deployments }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: list
-        run: |
-          ids=$(ls config/deployments/*.yml | xargs -n1 basename | sed 's/\.yml$//' | jq -R . | jq -cs .)
-          echo "deployments=$ids" >> "$GITHUB_OUTPUT"
+# Serialize runs so two of them never push the training-data branch at once.
+concurrency:
+  group: inference
+  cancel-in-progress: false
 
+# Allow the built-in GITHUB_TOKEN to push the training-data branch.
+permissions:
+  contents: write
+
+jobs:
   run:
-    needs: discover
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        deployment: ${{ fromJson(needs.discover.outputs.deployments) }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install eccodes (cfgrib GRIB2 decode for HRDPS Datamart)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeccodes0
+
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
-      - run: uv run python -m microclimate.pipelines.inference --deployment ${{ matrix.deployment }}
+      - name: Verify cfgrib can load eccodes
+        run: uv run python -c "import cfgrib; print('cfgrib', cfgrib.__version__)"
+
+      - name: Check out (or bootstrap) the public training-data store
         env:
-          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          STORE_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          if git clone --depth 1 --branch training-data "$STORE_URL" store 2>/dev/null; then
+            echo "Cloned existing training-data branch."
+          else
+            echo "training-data branch absent; bootstrapping an empty orphan branch."
+            rm -rf store && mkdir store
+            git -C store init -q
+            git -C store remote add origin "$STORE_URL"
+            git -C store checkout -q --orphan training-data
+          fi
+
+      - name: Run inference for each deployment (append snapshots to the store)
+        run: |
+          set -euo pipefail
+          for f in config/deployments/*.yml; do
+            id="$(basename "$f" .yml)"
+            echo "::group::inference $id"
+            TRAINING_STORE_ROOT=store uv run python -m microclimate.pipelines.inference --deployment "$id"
+            echo "::endgroup::"
+          done
+
+      - name: Commit & push new snapshots to training-data
+        run: |
+          set -euo pipefail
+          cd store
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No new store files; nothing to commit."
+          else
+            git commit -q -m "data: snapshots $(date -u +%FT%TZ)"
+            git push origin HEAD:training-data
+          fi

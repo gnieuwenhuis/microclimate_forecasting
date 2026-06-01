@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import os
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -28,6 +28,25 @@ from microclimate.publication.forecast_writer import write_forecast
 from microclimate.training_store import TrainingStore
 
 _ATTRIBUTION = ["Data Source: Environment and Climate Change Canada (ECCC)"]
+
+_HRDPS_PUBLISH_LAG = timedelta(hours=4)  # Datamart publishes each run ~3-4 h after init
+
+
+def _latest_hrdps_issue_time(now: datetime) -> datetime:
+    """Most recent HRDPS run init time (00/06/12/18 UTC) likely published by ``now``.
+
+    HRDPS runs four times daily; Datamart publishes each run ~3-4 h after its init time.
+    Subtracting the publish lag then flooring to the 6-hourly cycle yields a run that should
+    be available. If a chosen run is still unpublished, ``build_snapshot`` propagates the
+    connector error (``SourceUnavailable`` on a 404, or ``ForecastUnavailable``) and the next
+    hourly Action run retries; the training store dedupes a re-logged ``issue_time`` (ADR-0015),
+    so hourly re-runs are idempotent.
+    """
+    t = (
+        now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)
+    ) - _HRDPS_PUBLISH_LAG
+    run_hour = (t.hour // 6) * 6
+    return t.replace(hour=run_hour, minute=0, second=0, microsecond=0)
 
 
 def _assemble_forecast(
@@ -95,7 +114,7 @@ def main() -> None:
     station_keys = {config.target.connector_key, *(n.connector_key for n in config.neighbors)}
     observations = {k: cast(ObservationSource, get_source(k)) for k in station_keys}
     store = TrainingStore(Path(os.environ.get("TRAINING_STORE_ROOT", "training-store")))
-    issue_time = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    issue_time = _latest_hrdps_issue_time(datetime.now(UTC))
 
     run_inference(
         config,
