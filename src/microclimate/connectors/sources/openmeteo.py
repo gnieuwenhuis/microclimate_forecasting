@@ -165,6 +165,4 @@ class OpenMeteoSource(NWPSource):
         data = cast(dict[str, object], payload)
         if data.get("error"):
             raise SourceUnavailable(f"Open-Meteo error for {url!r}: {data.get('reason')}")
-        return _parse_hourly_to_forecast_frame(
-            data, issue_time=issue_time, lead_hours=lead_hours
-        )
+        return _parse_hourly_to_forecast_frame(data, issue_time=issue_time, lead_hours=lead_hours)

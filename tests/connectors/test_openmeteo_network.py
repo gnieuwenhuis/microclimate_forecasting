@@ -1,4 +1,5 @@
 """Live Open-Meteo smoke tests (network-marked; deselected by default)."""
+
 from __future__ import annotations
 
 import json

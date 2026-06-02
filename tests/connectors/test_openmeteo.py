@@ -1,4 +1,5 @@
 """Hermetic tests for the Open-Meteo connector (no network)."""
+
 from __future__ import annotations
 
 import json
@@ -86,8 +87,13 @@ def test_request_routing_and_shared_params() -> None:
     assert live_url.startswith("https://api.open-meteo.com/")
     assert hist_url.startswith("https://historical-forecast-api.open-meteo.com/")
     shared = (
-        "latitude", "longitude", "models", "cell_selection",
-        "wind_speed_unit", "timezone", "hourly",
+        "latitude",
+        "longitude",
+        "models",
+        "cell_selection",
+        "wind_speed_unit",
+        "timezone",
+        "hourly",
     )
     for k in shared:
         assert live_params[k] == hist_params[k], k
