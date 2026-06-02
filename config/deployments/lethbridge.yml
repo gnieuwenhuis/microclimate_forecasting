@@ -1,7 +1,7 @@
 # Deployment: lethbridge  (seeded — trainable from day one)
 #
 # Downscales HRDPS to a free, deep-history official station near Henderson Lake.
-# This is the pipeline-proving deployment: ECCC observations, CaSPAr historical seed,
+# This is the pipeline-proving deployment: ECCC observations, Open-Meteo seed backfill (ADR-0019),
 # champion/challenger publish gate. See ADR-0001, ADR-0006, ADR-0008, ADR-0010.
 #
 # Target + neighbors are live ECCC stations on the ungated bulk hourly CSV. ACIS was
@@ -9,8 +9,8 @@
 # the ag stations (spike #3 / docs/spikes/0003; pivot recorded in ADR-0010).
 
 deployment_id: lethbridge
-# Seeded deployment: every observation source has deep history; training uses the CaSPAr
-# seed + the logger. (v1 has only this strategy; cold-start is deferred — ADR-0008.)
+# Seeded deployment: every observation source has deep history; training uses the Open-Meteo
+# seed backfill + the logger. (v1 has only this strategy; cold-start is deferred — ADR-0008.)
 
 target:
   # ECCC Lethbridge CDA: a non-airport ag research station ~5 km E of Lethbridge and ~4 km
@@ -58,7 +58,7 @@ nwp:
   product: hrdps
   live_connector: openmeteo               # Open-Meteo HRDPS — inference (ADR-0019)
   historical_connector: openmeteo         # Open-Meteo HRDPS — training seed (ADR-0019)
-  sampling: nearest_grid_cell              # sample HRDPS at the target lat/lon
+  sampling: land                            # Open-Meteo cell_selection (elevation-aware land cell) — ADR-0019
 
 horizon_hours: 48
 lag_hours: 6                               # recent-observation window for obs features
@@ -72,9 +72,9 @@ label:
 
 training:
   seed:
-    source: caspar
-    start: "2017-05-22"                    # CaSPAr HRDPS archive start
-  holdout_months: 12                       # temporal holdout = most recent 12 months
+    source: openmeteo                      # Open-Meteo Historical Forecast API deep archive
+    start: "2024-01-01"                    # Open-Meteo HRDPS archive start (~2024)
+  holdout_months: 12                       # unchanged — full-year seasonal holdout
 
 output:
   forecast_json: "forecasts/lethbridge.json"   # published to gh-pages

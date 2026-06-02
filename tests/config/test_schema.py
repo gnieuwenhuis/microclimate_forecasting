@@ -52,3 +52,17 @@ def test_unknown_key_rejected() -> None:
     raw["training_strategy"] = "seeded"  # removed field — must be rejected
     with pytest.raises(ValidationError):
         DeploymentConfig.model_validate(raw)
+
+
+def test_lethbridge_uses_openmeteo_for_both_feeds() -> None:
+    import microclimate.connectors  # noqa: F401  # populate registry  # type: ignore[import]
+    from microclimate.config.loader import load_deployment
+    from microclimate.connectors.registry import validate_config_sources
+
+    config = load_deployment("lethbridge")
+    assert config.nwp.live_connector == "openmeteo"
+    assert config.nwp.historical_connector == "openmeteo"
+    assert config.nwp.sampling == "land"
+    assert config.training.seed.source == "openmeteo"
+    assert config.training.seed.start == "2024-01-01"
+    validate_config_sources(config)  # must not raise
