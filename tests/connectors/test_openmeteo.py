@@ -124,3 +124,20 @@ def test_source_raises_source_unavailable_on_api_error_payload() -> None:
     )
     with pytest.raises(SourceUnavailable):
         source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
+
+
+def test_request_spec_parity_live_vs_historical() -> None:
+    """Spatial/variable parity: shared keys identical across routes (ADR-0019 §1)."""
+    from microclimate.connectors.sources.openmeteo import _build_request
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    _, live = _build_request(
+        datetime(2026, 6, 2, 6, 0, tzinfo=UTC), 49.70, -112.77, list(range(1, 49)), now=now
+    )
+    _, hist = _build_request(
+        datetime(2024, 1, 5, 0, 0, tzinfo=UTC), 49.70, -112.77, list(range(1, 49)), now=now
+    )
+    shared_keys = set(live) & set(hist)
+    for k in shared_keys:
+        assert live[k] == hist[k], f"parity break on {k!r}: {live[k]!r} != {hist[k]!r}"
+    # Lead-time provenance is NOT pinned (accepted §1b skew): the route URLs differ by design.
