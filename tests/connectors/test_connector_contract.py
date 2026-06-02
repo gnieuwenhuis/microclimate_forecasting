@@ -9,7 +9,7 @@ from microclimate.connectors.registry import get_source, registered_keys
 from microclimate.contracts.forecast_frame import FORECAST_FRAME
 from microclimate.contracts.observation import OBSERVATION_FRAME
 
-from .conftest import build_hrdps_dataset, load_fixture, make_fetcher
+from .conftest import load_fixture, make_fetcher
 
 _KEYS = sorted(k for k in registered_keys() if not k.startswith("_"))
 
@@ -38,7 +38,7 @@ def test_source_conforms_to_contract(key: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Behavioural contract — hermetic for envcanada + hrdps_datamart; skip the rest.
+# Behavioural contract — hermetic for envcanada + openmeteo; skip the rest.
 # ---------------------------------------------------------------------------
 
 
@@ -47,8 +47,8 @@ def test_source_behavioral_contract(key: str) -> None:
     """Behavioural assertions for observation sources.
 
     * envcanada: driven hermetically with fixture-backed fetcher.
-    * hrdps_datamart: driven hermetically with injectable opener + synthetic Dataset.
-    * acis / hrdps_caspar: skipped until fetch_* is implemented.
+    * openmeteo: driven hermetically with fixture-backed fetcher.
+    * acis: skipped until fetch_* is implemented.
     """
     if key in _NOT_YET_IMPLEMENTED:
         pytest.skip(f"{key}: fetch_* not yet implemented")
@@ -57,129 +57,36 @@ def test_source_behavioral_contract(key: str) -> None:
         _assert_envcanada_behavioral_contract()
         return
 
-    if key == "hrdps_datamart":
-        _assert_hrdps_datamart_behavioral_contract()
+    if key == "openmeteo":
+        _assert_openmeteo_behavioral_contract()
         return
 
-    if key == "hrdps_caspar":
-        _assert_hrdps_caspar_behavioral_contract()
-        return
-
-    # If a new key is added without being covered here, fail loudly.
     pytest.fail(f"No behavioral contract assertion defined for source key {key!r}")
 
 
-def _assert_hrdps_datamart_behavioral_contract() -> None:
-    """Hermetic behavioural assertions for HrdpsDatamartSource."""
-    from datetime import UTC, datetime, timedelta
-
-    import pandas as pd
-
-    from microclimate.connectors.sources.hrdps_datamart import HrdpsDatamartSource
-
-    issue_time = datetime(2026, 5, 30, 0, 0, tzinfo=UTC)
-    lead_hours = [1, 2, 3]
-
-    ds = build_hrdps_dataset(lead_hours=(0, 1, 2, 3))
-
-    source = HrdpsDatamartSource(opener=lambda _issue, _leads: ds)
-    df = source.fetch_forecast(
-        issue_time=issue_time,
-        lat=51.0,
-        lon=-114.0,
-        lead_hours=lead_hours,
-    )
-
-    # Must validate against FORECAST_FRAME.
-    FORECAST_FRAME.validate(df)
-
-    # lead_hour column must be exactly [1, 2, 3].
-    assert list(df["lead_hour"]) == lead_hours
-
-    # valid_time == issue_time + lead_hour for every row.
-    for _, row in df.iterrows():
-        expected = pd.Timestamp(issue_time + timedelta(hours=int(row["lead_hour"])))
-        assert row["valid_time"] == expected
-
-    # All 8 physical variables must be non-null.
-    phys_vars = [
-        "temp_c",
-        "dewpoint_c",
-        "surface_pressure_hpa",
-        "precip_mm",
-        "cloud_cover_fraction",
-        "solar_radiation_wm2",
-        "wind_speed_ms",
-        "wind_dir_deg",
-    ]
-    for var in phys_vars:
-        assert df[var].notna().all(), f"{var} has null values"
-
-    # Spot-check converted value: target cell (0,0) has t2m=288.15 K → 15.0 °C.
-    assert float(df["temp_c"].iloc[0]) == pytest.approx(15.0, abs=1e-6)  # type: ignore[reportUnknownMemberType]
-
-
-def _assert_hrdps_caspar_behavioral_contract() -> None:
-    """Hermetic behavioural assertions for HrdpsCasparSource."""
-    import tempfile
-    from datetime import UTC, datetime, timedelta
+def _assert_openmeteo_behavioral_contract() -> None:
+    """Hermetic behavioural assertions for OpenMeteoSource (fixture-backed fetcher)."""
+    import json
+    from datetime import UTC, datetime
     from pathlib import Path
+    from typing import Any
 
-    import pandas as pd
+    from microclimate.connectors.sources.openmeteo import OpenMeteoSource
 
-    from microclimate.connectors.sources.hrdps_caspar import (
-        CASPAR_VAR_MAP,
-        HrdpsCasparSource,
-        _archive_path,  # noqa: PLC2701  # type: ignore[reportPrivateUsage]
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "openmeteo_historical.json").read_text()
     )
 
-    issue_time = datetime(2026, 5, 30, 0, 0, tzinfo=UTC)
-    lead_hours = [1, 2, 3]
+    def _fixed_fetcher(url: str, *, params: Any = None) -> str:  # noqa: ARG001
+        return json.dumps(payload)
 
-    ds = build_hrdps_dataset(var_map=CASPAR_VAR_MAP, lead_hours=(0, 1, 2, 3))
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        archive_root = Path(tmpdir)
-        # Create an empty file at the pinned path so resolution finds it.
-        expected = _archive_path(archive_root, issue_time, ".grib2")
-        expected.parent.mkdir(parents=True, exist_ok=True)
-        expected.touch()
-
-        source = HrdpsCasparSource(archive_root=archive_root, opener=lambda _p: ds)
-        df = source.fetch_forecast(
-            issue_time=issue_time,
-            lat=51.0,
-            lon=-114.0,
-            lead_hours=lead_hours,
-        )
-
-    # Must validate against FORECAST_FRAME.
+    source = OpenMeteoSource(
+        fetcher=_fixed_fetcher,
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    df = source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1, 2, 3])
     FORECAST_FRAME.validate(df)
-
-    # lead_hour column must be exactly [1, 2, 3].
-    assert list(df["lead_hour"]) == lead_hours
-
-    # valid_time == issue_time + lead_hour for every row.
-    for _, row in df.iterrows():
-        expected_ts = pd.Timestamp(issue_time + timedelta(hours=int(row["lead_hour"])))
-        assert row["valid_time"] == expected_ts
-
-    # All 8 physical variables must be non-null.
-    phys_vars = [
-        "temp_c",
-        "dewpoint_c",
-        "surface_pressure_hpa",
-        "precip_mm",
-        "cloud_cover_fraction",
-        "solar_radiation_wm2",
-        "wind_speed_ms",
-        "wind_dir_deg",
-    ]
-    for var in phys_vars:
-        assert df[var].notna().all(), f"{var} has null values"
-
-    # Spot-check converted value: target cell has TT=288.15 K → 15.0 °C.
-    assert float(df["temp_c"].iloc[0]) == pytest.approx(15.0, abs=1e-6)  # type: ignore[reportUnknownMemberType]
+    assert list(df["lead_hour"]) == [1, 2, 3]
 
 
 def _assert_envcanada_behavioral_contract() -> None:

@@ -25,11 +25,11 @@ def _raw() -> dict[str, object]:
                 "elevation_m": None,
             }
         ],
-        "enabled_sources": ["hrdps_datamart", "hrdps_caspar", "envcanada", "acis"],
+        "enabled_sources": ["openmeteo", "envcanada", "acis"],
         "nwp": {
             "product": "hrdps",
-            "live_connector": "hrdps_datamart",
-            "historical_connector": "hrdps_caspar",
+            "live_connector": "openmeteo",
+            "historical_connector": "openmeteo",
             "sampling": "nearest_grid_cell",
         },
         "horizon_hours": 48,

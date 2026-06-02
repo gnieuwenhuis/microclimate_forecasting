@@ -11,8 +11,6 @@ dependencies = [
   "scikit-learn>=1.4",
   "pyyaml>=6.0",
   "requests>=2.31",
-  "xarray>=2026.4.0",
-  "cfgrib>=0.9.15.1",
   "pyarrow>=16.0",
 ]
 

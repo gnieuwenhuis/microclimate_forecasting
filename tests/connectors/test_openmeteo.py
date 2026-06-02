@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import pytest
@@ -14,17 +16,26 @@ from microclimate.contracts.forecast_frame import FORECAST_FRAME
 _FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _load(name: str) -> dict:
-    return json.loads((_FIXTURES / name).read_text())
+def _load(name: str) -> dict[str, object]:
+    return json.loads((_FIXTURES / name).read_text())  # type: ignore[no-any-return]
+
+
+def _const_fetcher(body: str) -> Callable[..., str]:
+    def _fetch(url: str, *, params: Mapping[str, object] | None = None) -> str:
+        return body
+
+    return _fetch
 
 
 def test_parse_historical_fixture_to_forecast_frame() -> None:
-    from microclimate.connectors.sources.openmeteo import _parse_hourly_to_forecast_frame
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
 
     payload = _load("openmeteo_historical.json")
     # Fixture starts 2024-06-01T00:00; pick t0 there so leads 1..3 map to 01:00/02:00/03:00.
     t0 = datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
-    df = _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1, 2, 3])
+    df = _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1, 2, 3])  # pyright: ignore[reportPrivateUsage]
 
     FORECAST_FRAME.validate(df)
     assert list(df["lead_hour"]) == [1, 2, 3]
@@ -35,33 +46,40 @@ def test_parse_historical_fixture_to_forecast_frame() -> None:
 
 def test_parse_raises_when_lead_hour_absent() -> None:
     from microclimate.connectors.base import ForecastUnavailable
-    from microclimate.connectors.sources.openmeteo import _parse_hourly_to_forecast_frame
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
 
     payload = _load("openmeteo_historical.json")
     far = datetime(2024, 6, 3, 23, 0, tzinfo=UTC)  # t0+1 falls outside the fixture window
     with pytest.raises(ForecastUnavailable):
-        _parse_hourly_to_forecast_frame(payload, issue_time=far, lead_hours=[1])
+        _parse_hourly_to_forecast_frame(payload, issue_time=far, lead_hours=[1])  # pyright: ignore[reportPrivateUsage]
 
 
 def test_parse_raises_when_variable_is_null() -> None:
     from microclimate.connectors.base import ForecastUnavailable
-    from microclimate.connectors.sources.openmeteo import _parse_hourly_to_forecast_frame
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
 
     payload = _load("openmeteo_historical.json")
-    payload["hourly"]["temperature_2m"][1] = None  # type: ignore[index]
+    hourly = cast("dict[str, list[object]]", payload["hourly"])
+    hourly["temperature_2m"][1] = None
     t0 = datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
     with pytest.raises(ForecastUnavailable):
-        _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1])
+        _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1])  # pyright: ignore[reportPrivateUsage]
 
 
 def test_request_routing_and_shared_params() -> None:
-    from microclimate.connectors.sources.openmeteo import _build_request
+    from microclimate.connectors.sources.openmeteo import (
+        _build_request,  # pyright: ignore[reportPrivateUsage]
+    )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
-    live_url, live_params = _build_request(
+    live_url, live_params = _build_request(  # pyright: ignore[reportPrivateUsage]
         datetime(2026, 6, 2, 6, 0, tzinfo=UTC), 49.70, -112.77, [1, 48], now=now
     )
-    hist_url, hist_params = _build_request(
+    hist_url, hist_params = _build_request(  # pyright: ignore[reportPrivateUsage]
         datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1, 48], now=now
     )
 
@@ -96,7 +114,7 @@ def test_source_raises_source_unavailable_on_non_json() -> None:
     from microclimate.connectors.base import SourceUnavailable
 
     source = OpenMeteoSource(
-        fetcher=lambda _url, *, params: "not json",
+        fetcher=_const_fetcher("not json"),
         now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
     )
     with pytest.raises(SourceUnavailable):
@@ -107,7 +125,7 @@ def test_source_raises_source_unavailable_on_non_object_body() -> None:
     from microclimate.connectors.base import SourceUnavailable
 
     source = OpenMeteoSource(
-        fetcher=lambda _url, *, params: "[1, 2, 3]",
+        fetcher=_const_fetcher("[1, 2, 3]"),
         now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
     )
     with pytest.raises(SourceUnavailable):
@@ -119,7 +137,7 @@ def test_source_raises_source_unavailable_on_api_error_payload() -> None:
 
     body = json.dumps({"error": True, "reason": "Invalid coordinate"})
     source = OpenMeteoSource(
-        fetcher=lambda _url, *, params: body,
+        fetcher=_const_fetcher(body),
         now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
     )
     with pytest.raises(SourceUnavailable):
@@ -128,13 +146,15 @@ def test_source_raises_source_unavailable_on_api_error_payload() -> None:
 
 def test_request_spec_parity_live_vs_historical() -> None:
     """Spatial/variable parity: shared keys identical across routes (ADR-0019 §1)."""
-    from microclimate.connectors.sources.openmeteo import _build_request
+    from microclimate.connectors.sources.openmeteo import (
+        _build_request,  # pyright: ignore[reportPrivateUsage]
+    )
 
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
-    _, live = _build_request(
+    _, live = _build_request(  # pyright: ignore[reportPrivateUsage]
         datetime(2026, 6, 2, 6, 0, tzinfo=UTC), 49.70, -112.77, list(range(1, 49)), now=now
     )
-    _, hist = _build_request(
+    _, hist = _build_request(  # pyright: ignore[reportPrivateUsage]
         datetime(2024, 1, 5, 0, 0, tzinfo=UTC), 49.70, -112.77, list(range(1, 49)), now=now
     )
     shared_keys = set(live) & set(hist)
