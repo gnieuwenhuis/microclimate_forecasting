@@ -51,3 +51,28 @@ def test_parse_raises_when_variable_is_null() -> None:
     t0 = datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
     with pytest.raises(ForecastUnavailable):
         _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1])
+
+
+def test_request_routing_and_shared_params() -> None:
+    from microclimate.connectors.sources.openmeteo import _build_request
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    live_url, live_params = _build_request(
+        datetime(2026, 6, 2, 6, 0, tzinfo=UTC), 49.70, -112.77, [1, 48], now=now
+    )
+    hist_url, hist_params = _build_request(
+        datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1, 48], now=now
+    )
+
+    assert live_url.startswith("https://api.open-meteo.com/")
+    assert hist_url.startswith("https://historical-forecast-api.open-meteo.com/")
+    shared = (
+        "latitude", "longitude", "models", "cell_selection",
+        "wind_speed_unit", "timezone", "hourly",
+    )
+    for k in shared:
+        assert live_params[k] == hist_params[k], k
+    assert live_params["cell_selection"] == "land"
+    assert live_params["models"] == "gem_hrdps_continental"
+    assert hist_params["start_date"] == "2024-06-01" and hist_params["end_date"] == "2024-06-03"
+    assert "start_date" not in live_params

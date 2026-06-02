@@ -32,6 +32,43 @@ _PCT_TO_FRACTION: float = 100.0
 # Open-Meteo emits naive ISO timestamps in UTC when timezone=GMT.
 _OM_TIME_FMT: str = "%Y-%m-%dT%H:%M"
 
+_LIVE_URL: str = "https://api.open-meteo.com/v1/forecast"
+_HISTORICAL_URL: str = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+_GEM_MODEL: str = "gem_hrdps_continental"
+_HOURLY_CSV: str = ",".join(_OPENMETEO_VAR_MAP[c] for c in PHYSICAL_VARS)
+# Use the live endpoint when the run is recent enough to still be on it; else the deep archive.
+_LIVE_CUTOFF = timedelta(days=2)
+
+
+def _build_request(  # pyright: ignore[reportUnusedFunction]  # called by OpenMeteoSource (later task)
+    issue_time: datetime,
+    lat: float,
+    lon: float,
+    lead_hours: Sequence[int],
+    *,
+    now: datetime,
+) -> tuple[str, dict[str, str | int | float]]:
+    """Return (url, params). Recent issue_time → live endpoint; older → historical archive."""
+    if issue_time.tzinfo is not None:
+        issue_utc = issue_time.astimezone(UTC)
+    else:
+        issue_utc = issue_time.replace(tzinfo=UTC)
+    params: dict[str, str | int | float] = {
+        "latitude": lat,
+        "longitude": lon,
+        "models": _GEM_MODEL,
+        "cell_selection": "land",
+        "wind_speed_unit": "ms",
+        "timezone": "GMT",
+        "hourly": _HOURLY_CSV,
+    }
+    if issue_utc >= now.astimezone(UTC) - _LIVE_CUTOFF:
+        return _LIVE_URL, params
+    end = (issue_utc + timedelta(hours=max(lead_hours))).date()
+    params["start_date"] = issue_utc.date().isoformat()
+    params["end_date"] = end.isoformat()
+    return _HISTORICAL_URL, params
+
 
 def _parse_hourly_to_forecast_frame(  # pyright: ignore[reportUnusedFunction]  # called by OpenMeteoSource (later task)
     payload: dict[str, object],
