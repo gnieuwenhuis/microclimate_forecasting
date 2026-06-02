@@ -8,20 +8,24 @@
 ## Goal
 
 Replace the dead CaSPAr seed and the native MSC GRIB2 HRDPS feeds with **Open-Meteo** as the
-single source of HRDPS, for **both** training (Previous Runs API) and live inference
-(`/v1/forecast`), and **remove the inference logger** in favour of an idempotent retrain-time
-backfill. The HRDPS *model* and the downscaling thesis (ADR-0001, ADR-0010) are unchanged — only
-the *source* and the training-data accumulation mechanism change.
+single source of HRDPS, for **both** training (Historical Forecast API, deep archive) and live
+inference (`/v1/forecast`), and **remove the inference logger** in favour of an idempotent
+retrain-time backfill. The HRDPS *model* and the downscaling thesis (ADR-0001, ADR-0010) are
+unchanged — only the *source* and the training-data accumulation mechanism change.
+
+**Accepted v1 limitation (ADR-0019 §1b):** the deep archive is a **stitched short-lead** series,
+so the model trains on short-lead HRDPS but is served full-lead HRDPS — a lead-time skew we accept
+for v1 (local bias is largely lead-stable; the publish gate fails safe).
 
 Success = the `lethbridge` deployment trains and serves end-to-end off Open-Meteo HRDPS, with
-train/serve parity mechanically enforced, the native GRIB2 stack (and `cfgrib`/`xarray`/ecCodes)
+spatial/variable parity mechanically enforced, the native GRIB2 stack (and `cfgrib`/`xarray`/ecCodes)
 gone, and the public training store carrying lawful CC-BY-4.0 attribution.
 
 ## Architecture changes (before → after)
 
 ```
 BEFORE                                          AFTER
-  historical: hrdps_caspar ─┐                     historical: openmeteo ─┐ (Previous Runs)
+  historical: hrdps_caspar ─┐                     historical: openmeteo ─┐ (Historical Forecast API)
   live:       hrdps_datamart┼─ nwp_core (GRIB2)   live:       openmeteo ─┼─ direct JSON→FORECAST_FRAME
                             └─ FORECAST_FRAME                            └─ FORECAST_FRAME (no nwp_core)
   inference  → build_snapshot → publish + LOG     inference  → build_snapshot → publish (STATELESS)
@@ -37,8 +41,11 @@ accumulated-baseline assumption was verified to live only in `nwp_core`, which i
 
 - Implements the `NWPSource` contract: `fetch_forecast(issue_time, lat, lon, lead_hours) →
   FORECAST_FRAME`. Registered via `@register_source("openmeteo")`.
-- **Endpoint routing by `issue_time`:** recent → `/v1/forecast`; past → Previous Runs API. One
-  HTTP+JSON client (reuse `connectors/http.py`); no `cfgrib`, no `xarray`.
+- **Endpoint routing by `issue_time`:** recent → `api.open-meteo.com/v1/forecast`; past →
+  `historical-forecast-api.open-meteo.com/v1/forecast` (with `start_date`/`end_date` covering
+  `t0 … t0+48h`, then slice the hourly series to leads `1…48` relative to `t0`). Both return the
+  same `{hourly: {time, <vars>}}` shape, so one parser serves both. One HTTP+JSON client (reuse
+  `connectors/http.py` + `json.loads`); no `cfgrib`, no `xarray`.
 - **Request spec (pinned, identical on both routes):** `latitude`, `longitude`,
   `model=gem_hrdps_continental`, the 8-variable hourly set, explicit units, and
   **`cell_selection=land`**. Centralised in one builder so both routes are provably identical
@@ -105,16 +112,21 @@ ADR-0019; git history preserves the native path.)
 
 ### 7. Request-spec parity fitness function — `tests/`
 
-A test that asserts the live route and the Previous Runs route emit **identical** request
-parameters (coords, model, variable set, units, `cell_selection`). This is the train/serve-parity
-guarantee replacing the old "one HRDPS spec" convention (ADR-0019).
+A test that asserts the live route and the historical route emit **identical** request parameters
+for the shared keys (coords, model, variable set, units, `cell_selection`). This pins
+spatial/variable parity (the route URL and `start_date`/`end_date` legitimately differ; lead-time
+provenance is the accepted §1b skew, *not* asserted). Replaces the old "one HRDPS spec" convention
+(ADR-0019).
 
-### 8. Free-tier verification spike (do first)
+### 8. Network smoke test + fixture capture (do first)
 
-Hit the Previous Runs endpoint for `gem_hrdps_continental` **without** an API key and confirm a
-200 with data — settles the one ambiguous pricing-page line before we depend on free
-non-commercial access. Record as a short `docs/spikes/` note. If it fails, fall back to the
-documented S3 contingency (ADR-0019) and re-open the parity question.
+Free non-commercial deep access was already confirmed by direct probe (2026-06-02: both
+`api.open-meteo.com` and `historical-forecast-api.open-meteo.com` return GEM HRDPS for 2024 dates,
+no key). This task **records real JSON responses** from both endpoints as test fixtures
+(`tests/connectors/fixtures/openmeteo_forecast.json`, `openmeteo_historical.json`) so the connector
+parser (unit 1) is tested against true response shapes, and adds one `@pytest.mark.network` test per
+endpoint. Note the empirical finding for the record: HRDPS `_previous_day2+` is null, so the deep
+archive is short-lead only (the §1b basis).
 
 ### 9. README "Project status"
 
@@ -125,15 +137,16 @@ store.
 
 - **Inference (hourly):** `latest run → openmeteo /v1/forecast (target cell) → FORECAST_FRAME →
   build_snapshot → champion → forecast JSON`. No store writes.
-- **Training (retrain cadence):** `issue-times → openmeteo Previous Runs + envcanada historical →
-  training_data assembly → labeled rows → coalesce into store → build_features → train → gate`.
+- **Training (retrain cadence):** `issue-times → openmeteo Historical Forecast API + envcanada
+  historical → training_data assembly → labeled rows → coalesce into store → build_features →
+  train → gate`.
 
 ## Error handling / edge cases
 
 - **Unpublished/missing run:** `fetch_forecast` raises (NWP is complete-or-fail per
   `_flatten_forecast`); inference relies on the hourly retry, backfill logs+skips and continues.
 - **Open-Meteo outage during backfill:** safe — the additive store retains prior history; the run
-  resumes later. (Total/long outage caps *new* history at the rolling window — accepted risk.)
+  resumes later. (Total/long outage caps *new* history until it returns — accepted risk.)
 - **Late/QC-revised obs:** backfilled snapshots may have fewer missingness-mask gaps than live;
   masks degrade gracefully (accepted minor skew, ADR-0019).
 - **Rate limit:** throttle keeps us under 600/min; backfill is resumable if ever throttled.
@@ -144,8 +157,8 @@ store.
   endpoint routing by `issue_time`; `FORECAST_FRAME` validity.
 - Fitness: request-spec parity (unit 7); architecture test still passes (single `build_snapshot`
   path, ADR-0011); import-linter contract holds after deletions.
-- `@pytest.mark.network`: one live `/v1/forecast` and one Previous Runs call (deselected by
-  default).
+- `@pytest.mark.network`: one live `/v1/forecast` and one Historical Forecast API call (deselected
+  by default).
 - Backfill: idempotency (re-run = no dupes, no deletions) and additivity (rows absent from a
   second, narrower backfill survive) on a small date range.
 
@@ -160,6 +173,9 @@ store.
 
 ## Open risks
 
+- **Lead-time skew (ADR-0019 §1b):** short-lead seed vs full-lead serving. Accepted for v1; the
+  fast-follow if long-lead skill suffers is forward full-lead capture (Option 3, a lightweight
+  logger). Watch per-lead skill scores in the first publish-gate run.
 - Vendor dependence on Open-Meteo (mitigated by the additive store; S3 contingency documented).
 - ~1.3 yr effective training depth before the 12-month holdout — thin but the publish gate fails
   safe; revisit the holdout dial once the store has grown a year.
