@@ -40,12 +40,18 @@ weather agency**. It corrects an existing official forecast for local bias.
   system's primary input feature.
 - **HRDPS** (High Resolution Deterministic Prediction System) — the NWP backbone:
   Environment Canada's ~2.5 km model, 4 runs/day, hourly lead times 1–48 h. The single
-  source of the forecast being downscaled. Sampled at the target's grid cell.
-- **GeoMet** / **Datamart** — Environment Canada's free **live** HRDPS channels, used by
-  the **inference pipeline**.
-- **CaSPAr** (Canadian Surface Prediction Archive) — the free research archive of
-  historical HRDPS (from 2017-05-22). A queued bulk-request archive, **not** an API.
-  Used **once**, as the **historical seed** for the training store.
+  source of the forecast being downscaled. **Sourced via Open-Meteo** (a reprocessed
+  mirror — elevation-aware grid-cell selection, `cell_selection=land`), not raw GRIB2; the
+  *same* Open-Meteo product feeds both training and inference (ADR-0019).
+- **Open-Meteo** — the free public API that is the **single source of HRDPS**, under
+  CC-BY-4.0. Two endpoints behind one connector: **`/v1/forecast`** (live, hourly) for the
+  *inference pipeline*, and the **Previous Runs API** (full past runs as issued, from ~2024)
+  for the *seed backfill*. Replaces both the dead CaSPAr archive and the native MSC GRIB2
+  channels (GeoMet/Datamart) (ADR-0019, superseding ADR-0007 and ADR-0014).
+- **CaSPAr** *(retired — see ADR-0019)* — formerly the historical-HRDPS seed (Canadian
+  Surface Prediction Archive, from 2017-05-22). **Dead since ~mid-2025** (site offline,
+  unmaintained, no successor); replaced by the Open-Meteo Previous Runs backfill. Term kept
+  only so older ADRs read coherently.
 - **Observation** / **obs** — an actual measured reading from a weather station
   (temperature, precipitation, etc.) at a past or present time. Distinct from a forecast.
 
@@ -58,14 +64,15 @@ weather agency**. It corrects an existing official forecast for local bias.
   deployment: `lethbridge` (`seeded`), targeting ECCC Lethbridge CDA (#2265) — retargeted
   from ACIS Demo Farm once ACIS proved to have no ungated live-hourly feed (ADR-0010).
 - **Training strategy** — a per-deployment mode. v1 uses only **`seeded`**: all observation
-  sources have *deep* historical coverage and training uses the CaSPAr *historical seed* +
-  the logger (trainable from day one). A **`cold_start`** mode (live-only target, logger as
-  the sole label source, not trainable until logged data accumulates) is *designed but
-  deferred* — see *cold start*.
-- **Cold start** *(deferred — not in v1)* — the strategy for a target with no free deep
-  history (e.g. a CWOP PWS): labels accumulate forward via the logger. Documented in
-  ADR-0008 as the path for predicting *at Henderson Lake* once a station becomes reachable
-  there; not implemented in v1 because no free live station exists at Henderson today.
+  sources have *deep* historical coverage and training uses the **Open-Meteo Previous Runs
+  *historical seed backfill*** (re-pulled at each retrain, ~2024 onward), trainable from day
+  one (ADR-0019). A **`cold_start`** mode (live-only target, not trainable until forward data
+  accumulates) is *designed but deferred* — see *cold start*.
+- **Cold start** *(deferred — not in v1; needs redesign post-ADR-0019)* — the strategy for a
+  target with no free deep history (e.g. a CWOP PWS): labels accumulate forward over time.
+  Documented in ADR-0008 as the path for predicting *at Henderson Lake* once a station becomes
+  reachable there. Its original forward-accumulation mechanism was the now-removed logger
+  (ADR-0019); the cold-start path needs a new forward-capture design when revisited.
 - **Target** / **target station** — the single station a deployment predicts *for*. Its
   observations are the training **labels**, and (in v1) also an input feature.
 - **Neighbor** / **neighbor station** — a nearby station whose recent observations are
@@ -165,20 +172,24 @@ weather agency**. It corrects an existing official forecast for local bias.
 ### Infrastructure
 
 - **Inference pipeline** — the hourly job that builds a feature snapshot from live data,
-  runs the champion models, publishes the **forecast JSON**, and **logs the snapshot**.
-- **Logger** — the role of the inference pipeline as a self-accumulating data source:
-  every snapshot it builds is persisted so that, once its valid times pass and obs land, a
-  fully labeled training row exists. Decouples ongoing training from CaSPAr.
-- **Training pipeline** — the job that reads the **training store**, trains temp and PoP
-  models, evaluates them, and runs the publish gate.
-- **Training store** — the accumulating per-deployment dataset behind the logger: raw
-  **snapshots** (each `FeatureSnapshot` serialized as a blob + `SNAPSHOT_SCHEMA_VERSION`) plus
-  a separate **labels** table (per `issue_time`×`lead_hour`, written once obs land). One
-  **`data.parquet` per deployment-month** (coalesced **read-modify-write**, write-time dedupe;
-  latest `written_at` wins), path-based; persisted to a **public `training-data` branch** whose
-  state is **force-pushed** as a single commit by the hourly inference Action (ADR-0017,
-  ADR-0018, amending ADR-0009 now that ACIS is dropped). The store is raw-only — `TRAINING_ROW`
-  is the read-time join (snapshot → `build_features` → labels).
+  runs the champion models, and publishes the **forecast JSON**. It is **stateless** — it no
+  longer logs snapshots (the logger was removed in ADR-0019; training data comes from the
+  seed backfill).
+- **Seed backfill** — the **retrain-time** step that pulls full past HRDPS runs from
+  Open-Meteo Previous Runs (+ as-of ECCC obs) and assembles labeled rows into the training
+  store. **Idempotent and additive** — coalesces by `issue_time`×`lead_hour` and **never
+  prunes** existing rows, so the store accumulates *beyond* Open-Meteo's rolling retention
+  window and survives Open-Meteo pruning or outage (ADR-0019). This additivity is what makes
+  the store retention-independent — do not add a step that deletes rows absent from a backfill.
+- **Training pipeline** — the job that, at each retrain, runs the **seed backfill**, reads the
+  **training store**, trains temp and PoP models, evaluates them, and runs the publish gate.
+- **Training store** — the accumulating per-deployment dataset populated by the **seed
+  backfill**: raw **snapshots** (each `FeatureSnapshot` serialized as a blob +
+  `SNAPSHOT_SCHEMA_VERSION`) plus a separate **labels** table (per `issue_time`×`lead_hour`).
+  One **`data.parquet` per deployment-month** (coalesced **read-modify-write**, write-time
+  dedupe; latest `written_at` wins), path-based; persisted to a **public `training-data`
+  branch** (ADR-0017, ADR-0018). The store is raw-only — `TRAINING_ROW` is the read-time join
+  (snapshot → `build_features` → labels).
 - **Training-data assembly** — `pipelines.training_data`: iterates issue-times through
   `build_snapshot` → `build_features`, performs the single training-only future read of
   target observations, and labels the result. The shared seam used by the model-dev notebook
@@ -194,12 +205,14 @@ weather agency**. It corrects an existing official forecast for local bias.
   forecast JSON from the same origin. Lives in this repo, outside the Python import graph.
 - **The four homes** — where artifacts live: forecast JSON + dashboard + `registry.json`
   on `gh-pages` (public); model binaries as versioned GitHub **Release** assets (public);
-  the raw **training store** in a separate **private repo** (ADR-0009); source/configs/docs
-  in the main branch (public). Three public homes carry only derived works or code; the raw
-  store is the single private home.
+  the raw **training store** on a **public `training-data` branch** (ADR-0017, ADR-0018; the
+  ADR-0009 "private repo" stance is superseded — its raw data is now CC-BY-4.0 Open-Meteo
+  HRDPS + ECCC obs, redistributable with attribution); source/configs/docs in the main branch
+  (public). All four homes are public; the store carries its own attribution notice (ADR-0019).
 - **Derived product** — a transformation of the source data (the forecast JSON, the trained
-  models). Redistributable under all source licences *with attribution*; these are the only
-  data-bearing artifacts published publicly. Raw observations/forecasts are not (ADR-0009).
+  models). Redistributable under all source licences *with attribution*. Note: with the
+  Open-Meteo pivot (ADR-0019), the **raw training store is also publicly redistributed** — its
+  data is CC-BY-4.0/ECCC, so it ships publicly *with attribution* rather than being withheld.
 - **`registry.json`** — the manifest naming the current champion version per
   `(deployment_id, task)`. Updated by the publish gate; read by the inference pipeline.
 
@@ -208,15 +221,21 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **UTC everywhere.** All timestamps are UTC; local time is a display concern only.
 - **`schema_version`** is carried on both the forecast JSON and the training store, so
   clients and pipelines can refuse incompatible payloads instead of misreading them.
-- **One HRDPS spec.** HRDPS from CaSPAr (training) and from GeoMet/Datamart (inference)
-  must resolve to the identical variable/grid specification, or seed and logged data
-  diverge.
+- **One Open-Meteo request spec.** Training (Previous Runs) and inference (`/v1/forecast`)
+  must issue **identical** Open-Meteo request parameters — coordinates, model, variable set,
+  units, and `cell_selection=land` — so both resolve to the same grid cell and the same
+  product. Enforced by a shared request-spec fitness function, not convention (ADR-0019).
+  This is the train/serve-parity guarantee that replaces the old "one HRDPS spec" (which
+  spanned two native feeds).
 - **Attribution is mandatory.** Every public, data-bearing artifact carries source
-  attribution: ECCC (`Data Source: Environment and Climate Change Canada`) and CaSPAr
-  (cite Mai et al. 2020). (ACIS attribution is no longer required for v1 — ACIS is dropped,
-  ADR-0010 — but its licence section is retained in `DATA_LICENSES.md` for the deferred path.)
-  Enumerated in `DATA_LICENSES.md`, embedded in the forecast JSON `attribution` field, and
-  shown in the dashboard footer (ADR-0009).
+  attribution: **Open-Meteo** (`Weather data by Open-Meteo.com`, CC-BY-4.0, changes
+  indicated) and **ECCC** (`Data Source: Environment and Climate Change Canada` — the HRDPS
+  model and station observations). The CaSPAr / Mai et al. 2020 citation is **dropped**
+  (CaSPAr retired, ADR-0019); ACIS attribution remains not-required for v1 (ADR-0010, licence
+  section kept in `DATA_LICENSES.md` for the deferred path). Attribution is enumerated in
+  `DATA_LICENSES.md`, embedded in the forecast JSON `attribution` field, shown in the dashboard
+  footer, **and carried on the public `training-data` branch** (which redistributes the raw
+  CC-BY-4.0 data) — the last enforced by a CI check (ADR-0019).
 - **Guardrails over discipline.** Architectural rules are enforced mechanically (types,
   schemas, CI fitness functions), not by convention — see the scaffolding spec in
   `docs/superpowers/specs/`. Bad structural decisions should fail at construction or in CI.

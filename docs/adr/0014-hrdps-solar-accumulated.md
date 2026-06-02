@@ -1,8 +1,15 @@
 # 14. HRDPS solar is accumulated J/m²; nwp_core de-accumulates to mean W/m²
 
-- **Status:** Accepted
+- **Status:** **Superseded by ADR-0019** (was: Accepted)
 - **Date:** 2026-05-31
 - **Relates to:** ADR-0007 (one HRDPS spec — seed/live parity), the shared nwp_core core.
+
+> **Superseded (ADR-0019, 2026-06-02):** the live v1 NWP path is now Open-Meteo, which delivers
+> precip and shortwave **already de-accumulated** to hourly values and bypasses `nwp_core`
+> entirely. `nwp_core` and the native GRIB2 connectors are **deleted**, so the de-accumulation
+> mechanism below no longer exists in the codebase. De-accumulation is now a per-connector
+> responsibility (each `NWPSource` emits canonical hourly values by whatever means its encoding
+> requires). Retained for history.
 
 ## Context
 

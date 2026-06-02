@@ -1,11 +1,19 @@
 # 7. Self-accumulating training store: CaSPAr seed + inference logger
 
-- **Status:** Accepted — **store location amended by ADR-0009**
+- **Status:** **Superseded by ADR-0019** (was: Accepted — store location amended by ADR-0009)
 - **Date:** 2026-05-30
+
+> **Superseded (ADR-0019, 2026-06-02):** CaSPAr is dead and Open-Meteo became the single HRDPS
+> source. Both load-bearing ideas below are replaced: the **CaSPAr one-time seed** → **Open-Meteo
+> Previous Runs backfill re-run at each retrain**, and the **inference logger** → **removed**
+> (the inference pipeline is now stateless/publish-only). The training store survives but is fed
+> by the retrain-time backfill (idempotent, additive), not by an hourly logger. The text below is
+> retained for history only.
 
 > **Amendment (ADR-0009):** the self-accumulating training store below lives in a
 > **private repo** (written via a token), not a public `training-data` branch, because it
-> holds raw observations whose redistribution rights are unsettled (ACIS).
+> holds raw observations whose redistribution rights are unsettled (ACIS). *(Also superseded:
+> the store is public per ADR-0017/0018/0019 — its data is CC-BY-4.0/ECCC.)*
 
 ## Context
 
