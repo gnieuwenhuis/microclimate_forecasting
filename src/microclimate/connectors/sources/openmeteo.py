@@ -8,12 +8,16 @@ No nwp_core, no cfgrib/xarray — precip/solar arrive already de-accumulated.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pandas as pd
 
-from microclimate.connectors.base import ForecastUnavailable
+from microclimate.connectors.base import ForecastUnavailable, NWPSource, SourceUnavailable
+from microclimate.connectors.http import http_get
+from microclimate.connectors.registry import register_source
 from microclimate.contracts.forecast_frame import FORECAST_FRAME
 from microclimate.contracts.physical_vars import PHYSICAL_VARS
 
@@ -40,7 +44,7 @@ _HOURLY_CSV: str = ",".join(_OPENMETEO_VAR_MAP[c] for c in PHYSICAL_VARS)
 _LIVE_CUTOFF = timedelta(days=2)
 
 
-def _build_request(  # pyright: ignore[reportUnusedFunction]  # called by OpenMeteoSource (later task)
+def _build_request(
     issue_time: datetime,
     lat: float,
     lon: float,
@@ -70,7 +74,7 @@ def _build_request(  # pyright: ignore[reportUnusedFunction]  # called by OpenMe
     return _HISTORICAL_URL, params
 
 
-def _parse_hourly_to_forecast_frame(  # pyright: ignore[reportUnusedFunction]  # called by OpenMeteoSource (later task)
+def _parse_hourly_to_forecast_frame(
     payload: dict[str, object],
     *,
     issue_time: datetime,
@@ -125,3 +129,42 @@ def _parse_hourly_to_forecast_frame(  # pyright: ignore[reportUnusedFunction]  #
 
     df = pd.DataFrame(rows)
     return FORECAST_FRAME.validate(df)
+
+
+type _Fetcher = Callable[..., str]
+
+
+@register_source("openmeteo")
+class OpenMeteoSource(NWPSource):
+    """HRDPS via Open-Meteo — live + historical behind one connector (ADR-0019).
+
+    The registry instantiates this with no args, so the defaults must work argument-free.
+    ``fetcher`` (default ``http_get``) and ``now`` are injectable for hermetic tests.
+    """
+
+    def __init__(self, fetcher: _Fetcher | None = None, now: datetime | None = None) -> None:
+        self._fetcher: _Fetcher = fetcher if fetcher is not None else http_get
+        self._now: datetime | None = now
+
+    @property
+    def is_live(self) -> bool:
+        return True
+
+    def fetch_forecast(
+        self, issue_time: datetime, lat: float, lon: float, lead_hours: Sequence[int]
+    ) -> pd.DataFrame:
+        now = self._now if self._now is not None else datetime.now(UTC)
+        url, params = _build_request(issue_time, lat, lon, lead_hours, now=now)
+        body = self._fetcher(url, params=params)  # SourceUnavailable propagates from http_get
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise SourceUnavailable(f"Open-Meteo returned non-JSON for {url!r}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise SourceUnavailable(f"Open-Meteo returned a non-object body for {url!r}.")
+        data = cast(dict[str, object], payload)
+        if data.get("error"):
+            raise SourceUnavailable(f"Open-Meteo error for {url!r}: {data.get('reason')}")
+        return _parse_hourly_to_forecast_frame(
+            data, issue_time=issue_time, lead_hours=lead_hours
+        )

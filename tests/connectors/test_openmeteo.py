@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from microclimate.connectors.sources.openmeteo import OpenMeteoSource
 from microclimate.contracts.forecast_frame import FORECAST_FRAME
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -76,3 +77,50 @@ def test_request_routing_and_shared_params() -> None:
     assert live_params["models"] == "gem_hrdps_continental"
     assert hist_params["start_date"] == "2024-06-01" and hist_params["end_date"] == "2024-06-03"
     assert "start_date" not in live_params
+
+
+def test_source_fetch_forecast_hermetic() -> None:
+    payload = _load("openmeteo_historical.json")
+
+    def fake_fetcher(url: str, *, params: object) -> str:  # matches http_get(url, params=...)
+        return json.dumps(payload)
+
+    source = OpenMeteoSource(fetcher=fake_fetcher, now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC))
+    df = source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1, 2, 3])
+    FORECAST_FRAME.validate(df)
+    assert source.is_live is True
+    assert list(df["lead_hour"]) == [1, 2, 3]
+
+
+def test_source_raises_source_unavailable_on_non_json() -> None:
+    from microclimate.connectors.base import SourceUnavailable
+
+    source = OpenMeteoSource(
+        fetcher=lambda _url, *, params: "not json",
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SourceUnavailable):
+        source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
+
+
+def test_source_raises_source_unavailable_on_non_object_body() -> None:
+    from microclimate.connectors.base import SourceUnavailable
+
+    source = OpenMeteoSource(
+        fetcher=lambda _url, *, params: "[1, 2, 3]",
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SourceUnavailable):
+        source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
+
+
+def test_source_raises_source_unavailable_on_api_error_payload() -> None:
+    from microclimate.connectors.base import SourceUnavailable
+
+    body = json.dumps({"error": True, "reason": "Invalid coordinate"})
+    source = OpenMeteoSource(
+        fetcher=lambda _url, *, params: body,
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SourceUnavailable):
+        source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
