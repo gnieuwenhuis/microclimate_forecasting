@@ -44,14 +44,21 @@ weather agency**. It corrects an existing official forecast for local bias.
   mirror — elevation-aware grid-cell selection, `cell_selection=land`), not raw GRIB2; the
   *same* Open-Meteo product feeds both training and inference (ADR-0019).
 - **Open-Meteo** — the free public API that is the **single source of HRDPS**, under
-  CC-BY-4.0. Two endpoints behind one connector: **`/v1/forecast`** (live, hourly) for the
-  *inference pipeline*, and the **Previous Runs API** (full past runs as issued, from ~2024)
-  for the *seed backfill*. Replaces both the dead CaSPAr archive and the native MSC GRIB2
-  channels (GeoMet/Datamart) (ADR-0019, superseding ADR-0007 and ADR-0014).
+  CC-BY-4.0. Two endpoints behind one connector: **`/v1/forecast`** (live, full 1–48 leads) for
+  the *inference pipeline*, and the **Historical Forecast API** (deep archive from ~2024) for the
+  *seed backfill*. The deep archive is a **stitched short-lead series**, not full per-run leads, so
+  the seed and live feeds differ in lead-time provenance — see **Lead-time skew**. Replaces both
+  the dead CaSPAr archive and the native MSC GRIB2 channels (GeoMet/Datamart) (ADR-0019, superseding
+  ADR-0007 and ADR-0014).
+- **Lead-time skew** *(accepted v1 limitation — ADR-0019 §1b)* — the model **trains on short-lead**
+  HRDPS (the deep stitched seed) but is **served full-lead** HRDPS (`/v1/forecast`), a difference
+  that grows with lead hour. Accepted for v1 because the local-bias correction a downscaler learns
+  is largely lead-stable and the **publish gate fails safe**. True-parity forward capture is a
+  deferred fast-follow.
 - **CaSPAr** *(retired — see ADR-0019)* — formerly the historical-HRDPS seed (Canadian
   Surface Prediction Archive, from 2017-05-22). **Dead since ~mid-2025** (site offline,
-  unmaintained, no successor); replaced by the Open-Meteo Previous Runs backfill. Term kept
-  only so older ADRs read coherently.
+  unmaintained, no successor); replaced by the Open-Meteo Historical Forecast API backfill. Term
+  kept only so older ADRs read coherently.
 - **Observation** / **obs** — an actual measured reading from a weather station
   (temperature, precipitation, etc.) at a past or present time. Distinct from a forecast.
 
@@ -64,8 +71,9 @@ weather agency**. It corrects an existing official forecast for local bias.
   deployment: `lethbridge` (`seeded`), targeting ECCC Lethbridge CDA (#2265) — retargeted
   from ACIS Demo Farm once ACIS proved to have no ungated live-hourly feed (ADR-0010).
 - **Training strategy** — a per-deployment mode. v1 uses only **`seeded`**: all observation
-  sources have *deep* historical coverage and training uses the **Open-Meteo Previous Runs
-  *historical seed backfill*** (re-pulled at each retrain, ~2024 onward), trainable from day
+  sources have *deep* historical coverage and training uses the **Open-Meteo Historical Forecast
+  API *seed backfill*** (deep stitched short-lead, re-pulled at each retrain, ~2024 onward; see
+  *lead-time skew*), trainable from day
   one (ADR-0019). A **`cold_start`** mode (live-only target, not trainable until forward data
   accumulates) is *designed but deferred* — see *cold start*.
 - **Cold start** *(deferred — not in v1; needs redesign post-ADR-0019)* — the strategy for a
@@ -175,12 +183,12 @@ weather agency**. It corrects an existing official forecast for local bias.
   runs the champion models, and publishes the **forecast JSON**. It is **stateless** — it no
   longer logs snapshots (the logger was removed in ADR-0019; training data comes from the
   seed backfill).
-- **Seed backfill** — the **retrain-time** step that pulls full past HRDPS runs from
-  Open-Meteo Previous Runs (+ as-of ECCC obs) and assembles labeled rows into the training
-  store. **Idempotent and additive** — coalesces by `issue_time`×`lead_hour` and **never
-  prunes** existing rows, so the store accumulates *beyond* Open-Meteo's rolling retention
-  window and survives Open-Meteo pruning or outage (ADR-0019). This additivity is what makes
-  the store retention-independent — do not add a step that deletes rows absent from a backfill.
+- **Seed backfill** — the **retrain-time** step that pulls the deep HRDPS history from the
+  Open-Meteo **Historical Forecast API** (+ as-of ECCC obs) and assembles labeled rows into the
+  training store. **Idempotent and additive** — coalesces by `issue_time`×`lead_hour` and **never
+  prunes** existing rows, so the store survives Open-Meteo pruning or outage and accumulates
+  monotonically (ADR-0019). This additivity is a durability guarantee — do not add a step that
+  deletes rows absent from a backfill.
 - **Training pipeline** — the job that, at each retrain, runs the **seed backfill**, reads the
   **training store**, trains temp and PoP models, evaluates them, and runs the publish gate.
 - **Training store** — the accumulating per-deployment dataset populated by the **seed
@@ -221,12 +229,13 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **UTC everywhere.** All timestamps are UTC; local time is a display concern only.
 - **`schema_version`** is carried on both the forecast JSON and the training store, so
   clients and pipelines can refuse incompatible payloads instead of misreading them.
-- **One Open-Meteo request spec.** Training (Previous Runs) and inference (`/v1/forecast`)
-  must issue **identical** Open-Meteo request parameters — coordinates, model, variable set,
-  units, and `cell_selection=land` — so both resolve to the same grid cell and the same
-  product. Enforced by a shared request-spec fitness function, not convention (ADR-0019).
-  This is the train/serve-parity guarantee that replaces the old "one HRDPS spec" (which
-  spanned two native feeds).
+- **One Open-Meteo request spec.** Training (Historical Forecast API) and inference
+  (`/v1/forecast`) must issue **identical** Open-Meteo request parameters — coordinates, model,
+  variable set, units, and `cell_selection=land` — so both resolve to the same grid cell and
+  unit/variable contract. Enforced by a shared request-spec fitness function, not convention
+  (ADR-0019). This pins spatial/variable parity but **not lead-time provenance** — the deep seed
+  is short-lead-stitched while live serves full leads (see *lead-time skew*), the one accepted
+  v1 divergence. Replaces the old "one HRDPS spec" (which spanned two native feeds).
 - **Attribution is mandatory.** Every public, data-bearing artifact carries source
   attribution: **Open-Meteo** (`Weather data by Open-Meteo.com`, CC-BY-4.0, changes
   indicated) and **ECCC** (`Data Source: Environment and Climate Change Canada` — the HRDPS
