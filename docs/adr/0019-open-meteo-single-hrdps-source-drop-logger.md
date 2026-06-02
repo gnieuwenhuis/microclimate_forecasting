@@ -84,7 +84,7 @@ and the GitHub-Actions hourly cron proved flaky. The logger is removed:
   survives Open-Meteo pruning or outage. **This additivity is the retention-independence
   guarantee — no future cleanup step may delete rows absent from a backfill.**
 - This also **decouples training-data completeness from cron reliability**: a missed inference
-  run only staleness a forecast hour; the training set stays gapless because backfill pulls the
+  run only makes a forecast hour stale; the training set stays gapless because backfill pulls the
   full record from Open-Meteo regardless.
 
 The store stays public (ADR-0017/0018) and `seeded` (ADR-0010) is unchanged — `seeded` eligibility
