@@ -243,8 +243,10 @@ weather agency**. It corrects an existing official forecast for local bias.
   (CaSPAr retired, ADR-0019); ACIS attribution remains not-required for v1 (ADR-0010, licence
   section kept in `DATA_LICENSES.md` for the deferred path). Attribution is enumerated in
   `DATA_LICENSES.md`, embedded in the forecast JSON `attribution` field, shown in the dashboard
-  footer, **and carried on the public `training-data` branch** (which redistributes the raw
-  CC-BY-4.0 data) — the last enforced by a CI check (ADR-0019).
+  footer, **and placed on the public `training-data` branch root** (which redistributes the raw
+  CC-BY-4.0 data) by the store-publish step (deferred). The notice text lives in-repo at
+  `scripts/training_store_attribution.txt`; a CI check asserts that file exists in the repo
+  (ADR-0019), but the CI check does not place or verify it on the published branch.
 - **Guardrails over discipline.** Architectural rules are enforced mechanically (types,
   schemas, CI fitness functions), not by convention — see the scaffolding spec in
   `docs/superpowers/specs/`. Bad structural decisions should fail at construction or in CI.

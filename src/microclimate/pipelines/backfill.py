@@ -57,13 +57,15 @@ def backfill_store(
     prunes.
     """
     fresh_snapshots: list[FeatureSnapshot] = []
+    skipped: list[datetime] = []
     for t0 in issue_times:
         if store.has_snapshot(config.deployment_id, t0):
             continue
         try:
             snapshot = build_snapshot(config, t0, nwp, observations)
         except (ForecastUnavailable, SourceUnavailable):
-            continue  # run absent from the archive — skip; re-run stays gapless
+            skipped.append(t0)  # run absent from the archive — skip; re-run stays gapless
+            continue
         store.append_snapshot(snapshot)
         fresh_snapshots.append(snapshot)
         if pause_s:
@@ -78,4 +80,9 @@ def backfill_store(
         target_obs = target.fetch_historical(config.target.station_id, start, end)
         labeled = attach_labels(matrix, target_obs, config.label.precip_occurrence_threshold_mm)
         store.write_labels(config.deployment_id, labeled[_LABEL_COLS])
+    if skipped:
+        print(
+            f"backfill: skipped {len(skipped)} unavailable run(s):"
+            f" {[t.isoformat() for t in skipped]}"
+        )
     return len(fresh_snapshots)

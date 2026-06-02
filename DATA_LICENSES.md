@@ -24,8 +24,9 @@ footer) must carry the acknowledgments below.
 
 ## Environment and Climate Change Canada (ECCC / MSC) — HRDPS, station observations
 
-- **Source:** HRDPS via MSC GeoMet / Datamart (inference) and via CaSPAr (historical seed);
-  Environment Canada station observations (e.g. Lethbridge Airport, Climate ID 3033875).
+- **Source:** ECCC is the originating agency for the HRDPS model (now sourced via
+  Open-Meteo, CC-BY-4.0 — see above) and for station observations (e.g. Lethbridge Airport,
+  Climate ID 3033875) used as training labels and inference features.
 - **Licence:** *Environment and Climate Change Canada Data Servers End-use Licence*
   (v2.1, September 2022) — worldwide, royalty-free, perpetual, commercial use permitted.
   Explicitly grants the right to copy, modify, publish, and distribute the data for any

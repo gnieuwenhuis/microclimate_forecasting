@@ -30,17 +30,19 @@ _ATTRIBUTION = [
     "Data Source: Environment and Climate Change Canada (ECCC)",
 ]
 
-_HRDPS_PUBLISH_LAG = timedelta(hours=4)  # Datamart publishes each run ~3-4 h after init
+_HRDPS_PUBLISH_LAG = timedelta(
+    hours=4
+)  # heuristic: Open-Meteo makes a run available ~3-4 h after init
 
 
 def _latest_hrdps_issue_time(now: datetime) -> datetime:
-    """Most recent HRDPS run init time (00/06/12/18 UTC) likely published by ``now``.
+    """Most recent HRDPS run init time (00/06/12/18 UTC) likely available via Open-Meteo by ``now``.
 
-    HRDPS runs four times daily; Datamart publishes each run ~3-4 h after its init time.
-    Subtracting the publish lag then flooring to the 6-hourly cycle yields a run that should
-    be available. If a chosen run is still unpublished, ``build_snapshot`` propagates the
-    connector error (``SourceUnavailable`` on a 404, or ``ForecastUnavailable``) and the next
-    hourly Action run retries.
+    HRDPS runs four times daily; Open-Meteo typically makes each run available ~3-4 h after its
+    init time. Subtracting the publish lag then flooring to the 6-hourly cycle yields a run that
+    should be available. If the chosen run is not yet available, ``build_snapshot`` propagates the
+    connector error (``ForecastUnavailable`` or ``SourceUnavailable``) and the next hourly Action
+    run retries — fail-safe.
     """
     t = (
         now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)

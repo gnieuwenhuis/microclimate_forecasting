@@ -36,7 +36,7 @@ def _raw() -> dict[str, object]:
         "lag_hours": 6,
         "feature_groups": {"nwp": True, "observations": True},
         "label": {"precip_occurrence_threshold_mm": 0.2},
-        "training": {"seed": {"source": "caspar", "start": "2017-05-22"}, "holdout_months": 12},
+        "training": {"seed": {"source": "openmeteo", "start": "2024-01-01"}, "holdout_months": 12},
         "output": {"forecast_json": "forecasts/demo.json"},
     }
 
