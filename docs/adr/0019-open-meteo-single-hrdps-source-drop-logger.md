@@ -18,7 +18,7 @@ Two facts broke that design:
 
 1. **CaSPAr is dead.** `caspar-data.ca` is offline and unmaintained since ~mid-2025 (site
    refuses connections; the project's own GitHub issue #3 "site not accessible", opened Sept
-   2025, sits unanswered; last commit Sept 2024; no successor). The deep 2017→ HRDPS record is
+   2025, sits unanswered; last commit Sept 2024; no successor). The deep HRDPS record from 2017→present is
    **unrecoverable** from CaSPAr. Verified by independent agents against live evidence.
 2. **No other free source gives a deep, Canada-wide HRDPS-resolution archive.** MSC Datamart and
    the Herbie client both retain only ~30 days. US deep archives (HRRR/NAM/GEFS reforecast) do
