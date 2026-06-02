@@ -1,0 +1,6 @@
+This dataset contains weather data from Open-Meteo.com, licensed under CC-BY 4.0
+(https://creativecommons.org/licenses/by/4.0/). Data was modified: normalized,
+unit-converted, and resampled to a single target grid cell.
+
+Underlying model: HRDPS (High Resolution Deterministic Prediction System),
+© Environment and Climate Change Canada, used under the ECCC open-data licence.
