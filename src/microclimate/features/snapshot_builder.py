@@ -19,7 +19,12 @@ from datetime import UTC, datetime, timedelta
 import pandas as pd
 
 from microclimate.config.schema import DeploymentConfig, StationRef
-from microclimate.connectors.base import NWPSource, ObservationSource, SourceUnavailable
+from microclimate.connectors.base import (
+    ForecastUnavailable,
+    NWPSource,
+    ObservationSource,
+    SourceUnavailable,
+)
 from microclimate.contracts.physical_vars import PHYSICAL_VARS
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
 
@@ -110,12 +115,19 @@ def build_snapshot(
         issue_time.replace(tzinfo=UTC) if issue_time.tzinfo is None else issue_time.astimezone(UTC)
     )
     lead_hours = tuple(range(1, config.horizon_hours + 1))
+    actual_lead_hours = lead_hours  # may shrink if the NWP source truncated (far-lead nulls)
 
     # --- NWP (target cell only) — hard fail on connector errors (they propagate). ---
     nwp_features: dict[str, float] = {}
     if config.feature_groups.nwp:
         frame = nwp.fetch_forecast(issue_utc, config.target.lat, config.target.lon, lead_hours)
         nwp_features = _flatten_forecast(frame)
+        actual_lead_hours = tuple(int(h) for h in frame["lead_hour"])
+        if len(actual_lead_hours) < config.min_horizon_hours:
+            raise ForecastUnavailable(
+                f"only {len(actual_lead_hours)} HRDPS leads available for "
+                f"{issue_utc.isoformat()} (< min_horizon_hours={config.min_horizon_hours})"
+            )
 
     # --- Observations — degrade per station; StationNotFound propagates. ---
     obs_features: dict[str, float] = {}
@@ -160,6 +172,6 @@ def build_snapshot(
         observation_masks=obs_masks,
         static_features=static_features,
         temporal_features=_temporal_features(issue_utc),
-        lead_hours=lead_hours,
+        lead_hours=actual_lead_hours,
         schema_version=SNAPSHOT_SCHEMA_VERSION,
     )

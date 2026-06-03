@@ -8,7 +8,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from microclimate.connectors.base import ForecastUnavailable, SourceUnavailable, StationNotFound
+from microclimate.connectors.base import (
+    ForecastUnavailable,
+    NWPSource,
+    SourceUnavailable,
+    StationNotFound,
+)
 from microclimate.contracts.snapshot import SNAPSHOT_SCHEMA_VERSION, FeatureSnapshot
 from microclimate.features.snapshot_builder import build_snapshot
 
@@ -226,3 +231,68 @@ def test_missing_connector_key_raises_clear_error() -> None:
     nwp = FakeNWP(make_forecast_frame(_T0, [1]))
     with pytest.raises(KeyError, match="fake"):
         build_snapshot(config, _T0, nwp, {"other_network": FakeObs()})
+
+
+def test_build_snapshot_stores_actual_returned_leads() -> None:
+    """build_snapshot must record the ACTUAL leads returned by the NWP source, not the
+    requested tuple — so a truncated frame (far-lead nulls dropped) is faithfully reflected."""
+    import pandas as pd
+
+    from microclimate.contracts.forecast_frame import FORECAST_FRAME
+
+    class _TruncNWP(NWPSource):
+        @property
+        def is_live(self) -> bool:
+            return True
+
+        def fetch_forecast(  # type: ignore[override]
+            self, issue_time: datetime, lat: float, lon: float, lead_hours: tuple[int, ...]
+        ) -> pd.DataFrame:
+            rows: list[dict[str, object]] = []
+            for h in (1, 2, 3):  # truncated to 3 even though 1..6 requested
+                r: dict[str, object] = {
+                    "issue_time": pd.Timestamp(issue_time),
+                    "lead_hour": h,
+                    "valid_time": pd.Timestamp(issue_time) + pd.Timedelta(hours=h),
+                }
+                r.update(PINNED)
+                rows.append(r)
+            df = pd.DataFrame(rows)
+            df["issue_time"] = pd.to_datetime(df["issue_time"], utc=True)
+            df["valid_time"] = pd.to_datetime(df["valid_time"], utc=True)
+            return FORECAST_FRAME.validate(df)
+
+    config = make_config(horizon_hours=6, lag_hours=2, min_horizon_hours=2, observations=False)
+    snap = build_snapshot(config, _T0, _TruncNWP(), {})
+    assert snap.lead_hours == (1, 2, 3)
+
+
+def test_build_snapshot_raises_below_min_horizon() -> None:
+    """build_snapshot must raise ForecastUnavailable when the actual returned leads are fewer
+    than config.min_horizon_hours — so callers (seed backfill, inference retry) can skip."""
+    import pandas as pd
+
+    from microclimate.contracts.forecast_frame import FORECAST_FRAME
+
+    class _ShortNWP(NWPSource):
+        @property
+        def is_live(self) -> bool:
+            return True
+
+        def fetch_forecast(  # type: ignore[override]
+            self, issue_time: datetime, lat: float, lon: float, lead_hours: tuple[int, ...]
+        ) -> pd.DataFrame:
+            r: dict[str, object] = {
+                "issue_time": pd.Timestamp(issue_time),
+                "lead_hour": 1,
+                "valid_time": pd.Timestamp(issue_time) + pd.Timedelta(hours=1),
+            }
+            r.update(PINNED)
+            df = pd.DataFrame([r])
+            df["issue_time"] = pd.to_datetime(df["issue_time"], utc=True)
+            df["valid_time"] = pd.to_datetime(df["valid_time"], utc=True)
+            return FORECAST_FRAME.validate(df)
+
+    config = make_config(horizon_hours=6, lag_hours=2, min_horizon_hours=3, observations=False)
+    with pytest.raises(ForecastUnavailable):
+        build_snapshot(config, _T0, _ShortNWP(), {})
