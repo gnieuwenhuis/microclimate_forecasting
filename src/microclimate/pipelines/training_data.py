@@ -38,15 +38,26 @@ def assemble_training_rows(
     # Prefetch each station's full observation window once and serve as-of slices from memory,
     # so a multi-issue-time assembly does O(stations) obs fetches instead of O(issue_times) — the
     # same optimisation backfill_store uses. The window covers the lagged as-of reads and the
-    # forward label read (valid_time up to max issue_time + horizon).
-    win_start = min(times) - timedelta(hours=config.lag_hours)
-    win_end = max(times) + timedelta(hours=config.horizon_hours)
-    obs: dict[str, ObservationSource] = {}
-    for key, src in observations.items():
-        ids_for_key = [
-            ref.station_id for ref in (config.target, *config.neighbors) if ref.connector_key == key
-        ]
-        obs[key] = CachingObservationSource(src, ids_for_key, win_start, win_end)
+    # forward label read (valid_time up to max issue_time + horizon). Only worth doing when the
+    # observation feature group is on (otherwise build_snapshot reads no station obs at all, and
+    # only the single target label read below is needed).
+    obs: Mapping[str, ObservationSource] = observations
+    if config.feature_groups.observations:
+        win_start = min(times) - timedelta(hours=config.lag_hours)
+        win_end = max(times) + timedelta(hours=config.horizon_hours)
+        obs = {
+            key: CachingObservationSource(
+                src,
+                [
+                    r.station_id
+                    for r in (config.target, *config.neighbors)
+                    if r.connector_key == key
+                ],
+                win_start,
+                win_end,
+            )
+            for key, src in observations.items()
+        }
 
     matrices: list[pd.DataFrame] = []
     for issue_time in times:
@@ -54,8 +65,8 @@ def assemble_training_rows(
         matrices.append(build_features(snapshot, config))
     matrix = pd.concat(matrices, ignore_index=True)
 
-    # Single batched future read of the target station across the whole valid-time span
-    # (served from the prefetched cache).
+    # Single batched future read of the target station across the whole valid-time span (served
+    # from the prefetch cache when the observation group is on, else a direct one-shot read).
     target_source = obs[config.target.connector_key]
     start = matrix["valid_time"].min().to_pydatetime()
     end = matrix["valid_time"].max().to_pydatetime()

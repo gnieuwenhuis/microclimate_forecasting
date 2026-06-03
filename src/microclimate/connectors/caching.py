@@ -18,6 +18,12 @@ import pandas as pd
 from microclimate.connectors.base import HistoricalCoverage, ObservationSource
 
 
+def _to_utc(value: datetime) -> pd.Timestamp:
+    """UTC-aware Timestamp; naive inputs are assumed UTC (project convention)."""
+    ts = pd.Timestamp(value)
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 class CachingObservationSource(ObservationSource):
     """Prefetch each station's full window once; serve ``fetch_historical`` slices from memory."""
 
@@ -41,7 +47,9 @@ class CachingObservationSource(ObservationSource):
         df = self._cache.get(station_id)
         if df is None:
             return self._inner.fetch_historical(station_id, start, end)
-        s, e = pd.Timestamp(start), pd.Timestamp(end)
+        # Normalise bounds to UTC so a naive caller (naive-is-UTC) doesn't trip a tz-naive vs
+        # tz-aware comparison against the UTC OBSERVATION_FRAME timestamps.
+        s, e = _to_utc(start), _to_utc(end)
         return df[(df["timestamp"] >= s) & (df["timestamp"] <= e)].reset_index(drop=True)
 
     def fetch_live(self, station_id: str, since: datetime) -> pd.DataFrame:
