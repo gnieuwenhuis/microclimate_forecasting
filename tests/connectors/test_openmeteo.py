@@ -101,6 +101,13 @@ def test_request_routing_and_shared_params() -> None:
     assert live_params["models"] == "gem_hrdps_continental"
     assert hist_params["start_date"] == "2024-06-01" and hist_params["end_date"] == "2024-06-03"
     assert "start_date" not in live_params
+    # Live route must include forecast_days covering max lead; historical route must not.
+    import math
+
+    max_lead = 48
+    assert "forecast_days" in live_params
+    assert int(live_params["forecast_days"]) >= math.ceil(max_lead / 24)
+    assert "forecast_days" not in hist_params
 
 
 def test_source_fetch_forecast_hermetic() -> None:

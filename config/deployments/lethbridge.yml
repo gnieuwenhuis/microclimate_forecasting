@@ -9,8 +9,8 @@
 # the ag stations (spike #3 / docs/spikes/0003; pivot recorded in ADR-0010).
 
 deployment_id: lethbridge
-# Seeded deployment: every observation source has deep history; training uses the Open-Meteo
-# seed backfill + the logger. (v1 has only this strategy; cold-start is deferred — ADR-0008.)
+# Seeded deployment: every observation source has deep history; training data comes from the
+# retrain-time Open-Meteo seed backfill (ADR-0019). Cold-start deferred — ADR-0008.
 
 target:
   # ECCC Lethbridge CDA: a non-airport ag research station ~5 km E of Lethbridge and ~4 km

@@ -67,6 +67,7 @@ def _build_request(
         "hourly": _HOURLY_CSV,
     }
     if issue_utc >= now.astimezone(UTC) - _LIVE_CUTOFF:
+        params["forecast_days"] = min(16, max(2, (max(lead_hours) // 24) + 2))
         return _LIVE_URL, params
     end = (issue_utc + timedelta(hours=max(lead_hours))).date()
     params["start_date"] = issue_utc.date().isoformat()

@@ -159,3 +159,50 @@ def test_hrdps_issue_times_off_boundary_start() -> None:
         datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
         datetime(2024, 1, 1, 18, 0, tzinfo=UTC),
     ]
+
+
+def test_backfill_obs_prefetched_once_per_station(tmp_path: Path) -> None:
+    """Inner fetch_historical must be called exactly once per station, not once per issue_time."""
+    from microclimate.config.loader import load_deployment
+    from microclimate.pipelines.backfill import backfill_store, hrdps_issue_times
+    from microclimate.training_store.store import TrainingStore
+
+    config = load_deployment("lethbridge")
+    store = TrainingStore(tmp_path)
+
+    # Count calls to fetch_historical per station_id.
+    call_counts: dict[str, int] = {}
+
+    class _CountingObs(_FakeObs):
+        def fetch_historical(self, station_id: str, start: datetime, end: datetime) -> pd.DataFrame:
+            call_counts[station_id] = call_counts.get(station_id, 0) + 1
+            return super().fetch_historical(station_id, start, end)
+
+    obs_map: dict[str, ObservationSource] = {
+        config.target.connector_key: _CountingObs(),
+    }
+
+    times = hrdps_issue_times(
+        datetime(2024, 1, 1, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 1, 18, 0, tzinfo=UTC),
+    )  # 4 issue_times
+    assert len(times) == 4
+
+    backfill_store(
+        config,
+        nwp=_FakeNWP(),
+        observations=obs_map,
+        store=store,
+        issue_times=times,
+        pause_s=0.0,
+    )
+
+    # lethbridge: target + 4 neighbors = 5 distinct stations, all under "envcanada".
+    all_station_ids = [config.target.station_id, *(n.station_id for n in config.neighbors)]
+    assert len(all_station_ids) == 5
+
+    # Each station should be fetched exactly once (the prefetch), NOT once per issue_time.
+    for sid in all_station_ids:
+        assert call_counts.get(sid, 0) == 1, (
+            f"station {sid!r} was fetched {call_counts.get(sid, 0)} times; expected 1"
+        )
