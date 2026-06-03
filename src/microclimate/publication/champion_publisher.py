@@ -7,7 +7,7 @@ The deterministic version/tag/asset names let registry.json reference the Releas
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -23,8 +23,14 @@ class _Saveable(Protocol):
 
 
 def champion_version(deployment_id: str, task: Task, run_time: datetime) -> str:
-    """Deterministic version string from the run time (UTC), e.g. lethbridge-temp-20260603T1405Z."""
-    return f"{deployment_id}-{task}-{run_time:%Y%m%dT%H%M}Z"
+    """Deterministic version string from the run time, e.g. lethbridge-temp-20260603T1405Z.
+
+    The ``Z`` suffix asserts UTC, so normalise first: a naive ``run_time`` is assumed UTC,
+    an aware one is converted — otherwise the encoded time wouldn't match the ``Z`` label and
+    the version/tag/URL would point at the wrong Release asset.
+    """
+    utc = run_time.astimezone(UTC) if run_time.tzinfo is not None else run_time.replace(tzinfo=UTC)
+    return f"{deployment_id}-{task}-{utc:%Y%m%dT%H%M}Z"
 
 
 def release_tag(version: str) -> str:

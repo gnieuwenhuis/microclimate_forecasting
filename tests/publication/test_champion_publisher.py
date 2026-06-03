@@ -51,3 +51,15 @@ def _fit_tiny_temp_model() -> TemperatureRegressor:
     model = TemperatureRegressor()
     model.fit(rows)
     return model
+
+
+def test_champion_version_normalizes_naive_and_aware_to_utc() -> None:
+    from datetime import timedelta, timezone
+
+    from microclimate.publication.champion_publisher import champion_version
+
+    # 14:05 in UTC+2 == 12:05Z; a naive 12:05 is assumed UTC. Both must encode 12:05Z.
+    aware = datetime(2026, 6, 3, 14, 5, tzinfo=timezone(timedelta(hours=2)))
+    naive = datetime(2026, 6, 3, 12, 5)
+    assert champion_version("lethbridge", "temp", aware) == "lethbridge-temp-20260603T1205Z"
+    assert champion_version("lethbridge", "temp", naive) == "lethbridge-temp-20260603T1205Z"

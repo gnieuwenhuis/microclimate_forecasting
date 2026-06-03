@@ -21,8 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write          # push training-data + gh-pages, create Releases
+    # One shared group across the whole matrix: the training-data and gh-pages branches are
+    # shared by all deployments, so matrix jobs must serialize (a per-deployment group would let
+    # them race — force-pushing the store from a stale clone / non-fast-forward gh-pages pushes).
     concurrency:
-      group: training-${{ matrix.deployment }}
+      group: training-shared-state
+      cancel-in-progress: false
     strategy:
       matrix:
         deployment: ${{ fromJson(needs.discover.outputs.deployments) }}

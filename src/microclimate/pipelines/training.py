@@ -104,7 +104,10 @@ def run_training(
     config = load_deployment(deployment_id)
     validate_config_sources(config)
     now = now or datetime.now(UTC)
-    start = start or datetime.fromisoformat(config.training.seed.start).replace(tzinfo=UTC)
+    if start is None:
+        seed = datetime.fromisoformat(config.training.seed.start)
+        # naive seed.start is assumed UTC; an aware value is converted (don't clobber its tz).
+        start = seed.astimezone(UTC) if seed.tzinfo is not None else seed.replace(tzinfo=UTC)
     holdout_months = (
         holdout_months if holdout_months is not None else config.training.holdout_months
     )
