@@ -212,10 +212,11 @@ weather agency**. It corrects an existing official forecast for local bias.
 - **Forecast JSON** — the single published, schema-versioned output document a deployment
   produces. The only thing thin clients read. Carries an **`attribution`** field (data-source
   acknowledgments) and never embeds raw observations — only derived predictions (ADR-0009).
-  `status` ∈ `ok` | `stale` | `degraded`: **`ok`** — full-horizon forecast from the champion;
-  **`stale`** — forecast horizon was truncated below `horizon_hours` (fewer than the target
-  leads were available from HRDPS); **`degraded`** — champion was unavailable and the baseline
-  was used instead. `degraded` takes precedence over `stale`.
+  `status` ∈ `ok` | `stale` | `degraded`: **`ok`** — full-horizon forecast (neither truncated nor
+  degraded; champion *or* baseline); **`stale`** — forecast horizon was truncated below
+  `horizon_hours` (fewer than the target leads were available from HRDPS); **`degraded`** — an
+  expected champion couldn't be served so the baseline was used. Precedence: `degraded` > `stale`
+  > `ok` (per-run, not per-task; `model_versions` records the actual producer per task).
 - **Thin client** — a consumer that *only* reads the forecast JSON (never touches HRDPS,
   station feeds, or models). The dashboard and the future Android app are thin clients.
 - **Dashboard** — the v1 thin client: static files served from GitHub Pages, reading the
