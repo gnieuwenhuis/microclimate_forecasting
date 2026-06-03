@@ -35,7 +35,7 @@ function windowSeries(series) {
   const end = now + WINDOW_HOURS * 3600000;
   return series.filter((step) => {
     const t = Date.parse(step.valid_time);
-    return t >= now && t <= end;
+    return t >= now && t < end; // [now, now+WINDOW_HOURS): exclusive end caps at WINDOW_HOURS steps
   });
 }
 
@@ -104,7 +104,7 @@ function dualSVG(series, { w = 1000, h = 320, pad = { l: 38, r: 40, t: 18, b: 28
 // ---- full view (A-header + C body). `win` is the windowed series (next WINDOW_HOURS). ----
 function view(doc, win) {
   const next = win[0]; // soonest upcoming hour
-  const dh = Math.round((Date.parse(next.valid_time) - Date.now()) / 3600000);
+  const dh = Math.max(0, Math.ceil((Date.parse(next.valid_time) - Date.now()) / 3600000));
   const whenLabel = dh <= 0 ? "this hour" : `in ${dh} h`;
   const rows = win
     .map(
