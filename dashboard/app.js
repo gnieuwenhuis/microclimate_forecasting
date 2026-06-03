@@ -2,7 +2,7 @@
 // No raw data, no secrets, no build step. Hand-rolled SVG, local time, auto light/dark.
 const SUPPORTED_SCHEMA_MAJOR = "1";
 const params = new URLSearchParams(location.search);
-const DEPLOYMENT = (params.get("deployment") || "lethbridge").toLowerCase();
+const DEPLOYMENT = ((params.get("deployment") || "lethbridge").toLowerCase().replace(/[^a-z0-9_-]/g, "")) || "lethbridge";
 
 // ---- formatters (local time) ----
 const fmtHour = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
