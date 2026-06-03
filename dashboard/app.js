@@ -52,8 +52,11 @@ function displayStatus(doc) {
   if (doc.status === "degraded") {
     return { cls: "degraded", label: "Degraded", title: "A model fell back to baseline — an expected champion was unusable." };
   }
-  if (ageMin > FRESH_MAX_MIN || !coversWindow) {
+  if (ageMin > FRESH_MAX_MIN) {
     return { cls: "stale", label: "Delayed", title: `Last updated ${ago(doc.last_updated)}; the hourly update may be behind.` };
+  }
+  if (!coversWindow) {
+    return { cls: "stale", label: "Delayed", title: `The forecast doesn't extend a full ${WINDOW_HOURS} h ahead.` };
   }
   return { cls: "ok", label: "Live", title: `Fresh — updated ${ago(doc.last_updated)}, covering the next ${WINDOW_HOURS} h.` };
 }
