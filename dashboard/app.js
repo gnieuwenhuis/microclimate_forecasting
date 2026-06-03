@@ -113,7 +113,9 @@ function dualSVG(series, { w = 1000, h = 320, pad = { l: 38, r: 40, t: 18, b: 28
   for (let i = 0; i < series.length; i += xstep) {
     xl += `<text x="${x(i)}" y="${h - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${fmtHour(series[i].valid_time)}</text>`;
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="none" style="height:${h}px">${grid}${days}${bars}<path d="${dLine}" fill="none" stroke="var(--temp)" stroke-width="2.5" stroke-linejoin="round"/>${xl}</svg>`;
+  // viewBox width is set to the rendered pixel width by drawChart() so the mapping is 1:1 and
+  // text/strokes are never distorted (the old preserveAspectRatio="none" squashed labels on mobile).
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="height:${h}px; display:block">${grid}${days}${bars}<path d="${dLine}" fill="none" stroke="var(--temp)" stroke-width="2.5" stroke-linejoin="round"/>${xl}</svg>`;
 }
 
 // ---- full view (A-header + C body). `win` is the windowed series (next WINDOW_HOURS). ----
@@ -147,7 +149,7 @@ function view(doc, win) {
   </section>
   <section class="panel chart">
     <div class="legend muted"><span class="temp">— temperature</span> &nbsp; <span class="pop">▮ precip probability</span></div>
-    ${dualSVG(win)}
+    <div class="chartbox"></div>
   </section>
   <section class="panel meta">
     <dl>
@@ -174,6 +176,17 @@ function message(html) {
   document.getElementById("app").innerHTML = `<div class="msg">${html}</div>`;
 }
 
+// Draw the chart sized to the real container width so the SVG maps 1:1 to pixels (no horizontal
+// squash of the axis labels on narrow screens). Re-runs on resize/orientation change.
+let _win = null;
+function drawChart() {
+  const box = document.querySelector(".chartbox");
+  if (!box || !_win) return;
+  const w = Math.round(box.clientWidth) || 920; // measured px → viewBox is 1:1 (no distortion)
+  box.innerHTML = dualSVG(_win, { w });
+}
+addEventListener("resize", drawChart);
+
 async function load() {
   try {
     const res = await fetch(`forecasts/${DEPLOYMENT}.json`, { cache: "no-store" });
@@ -195,7 +208,9 @@ async function load() {
       message("No upcoming forecast hours — the latest run is stale.");
       return;
     }
+    _win = win;
     document.getElementById("app").innerHTML = view(doc, win);
+    drawChart();
   } catch (e) {
     message("Forecast unavailable.");
     console.error(e);
