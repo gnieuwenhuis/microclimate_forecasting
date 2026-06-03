@@ -1,29 +1,33 @@
-"""Stateless inference pipeline (ADR-0019): build snapshot → baseline forecast → write JSON.
+"""Stateless inference pipeline (ADR-0019): snapshot → champion/baseline forecast → write JSON.
 
 No snapshot logging; training data is collected via a separate retrain-time backfill.
-Registry/champion-loading and the private-repo/gh-pages git sync are out of scope (separate
-specs); this writes to local paths.
+Registry/champion-loading: load_champion per task; fall back to baseline on failure; mark
+status="degraded" only when an expected champion (a real registry entry) can't be served.
 """
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import pandas as pd
 
 from microclimate.config.loader import load_deployment
 from microclimate.config.schema import DeploymentConfig
-from microclimate.connectors.base import NWPSource, ObservationSource
+from microclimate.connectors.base import ConnectorError, NWPSource, ObservationSource
+from microclimate.connectors.http import http_get_bytes
 from microclimate.connectors.registry import get_source
 from microclimate.contracts.forecast import FORECAST_SCHEMA_VERSION, ForecastDocument, ForecastStep
+from microclimate.contracts.registry import RegistryManifest, Task, manifest_key
 from microclimate.features.feature_builder import build_features
 from microclimate.features.snapshot_builder import build_snapshot
 from microclimate.models.baseline import BASELINE_VERSION, baseline_predictions
+from microclimate.publication.champion_loader import load_champion
 from microclimate.publication.forecast_writer import write_forecast
+from microclimate.publication.registry_store import read_registry
 
 _ATTRIBUTION = [
     "Weather data by Open-Meteo.com (CC-BY 4.0)",
@@ -51,13 +55,57 @@ def _latest_hrdps_issue_time(now: datetime) -> datetime:
     return t.replace(hour=run_hour, minute=0, second=0, microsecond=0)
 
 
+def _read_registry_safe(registry_path: Path) -> RegistryManifest:
+    try:
+        return read_registry(registry_path)
+    except Exception as exc:  # noqa: BLE001 — a bad registry must not stop the hourly product
+        print(f"inference: registry unreadable ({type(exc).__name__}: {exc}); using baseline")
+        return RegistryManifest()
+
+
+def _serve_task(
+    task: Task,
+    manifest: RegistryManifest,
+    matrix: pd.DataFrame,
+    base: pd.DataFrame,
+    config: DeploymentConfig,
+    registry_path: Path,
+    work_dir: Path,
+    fetch_bytes: Callable[[str], bytes],
+) -> tuple[str, pd.Series, bool]:  # type: ignore[type-arg]
+    """Return (version, predictions, degraded) for a single task.
+
+    degraded=True only when a real registry entry exists but can't be loaded/predicted.
+    """
+    base_col = "pred_temp_c" if task == "temp" else "pred_pop"
+    entry = manifest.entries.get(manifest_key(config.deployment_id, task))
+    if entry is None or entry.version == "baseline":
+        return BASELINE_VERSION, base[base_col], False
+    try:
+        champion = load_champion(
+            config.deployment_id, registry_path, task, work_dir, fetch_bytes=fetch_bytes
+        )
+        if champion is None:
+            return BASELINE_VERSION, base[base_col], False
+        preds = champion.predict(matrix)
+        return entry.version, preds, False
+    except (ConnectorError, ValueError, OSError) as exc:
+        print(
+            f"inference: champion '{entry.version}' unusable for {task} "
+            f"({type(exc).__name__}: {exc}); using baseline"
+        )
+        return BASELINE_VERSION, base[base_col], True
+
+
 def _assemble_forecast(
     config: DeploymentConfig,
     preds: pd.DataFrame,
     issue_time: datetime,
     last_updated: datetime,
+    model_versions: dict[Literal["temp", "pop"], str],
+    status: Literal["ok", "stale", "degraded"],
 ) -> ForecastDocument:
-    """Reshape per-(lead) baseline predictions into a ForecastDocument.
+    """Reshape per-(lead) predictions into a ForecastDocument.
 
     ADR-0012: the pipeline owns this reshape.
     """
@@ -78,8 +126,8 @@ def _assemble_forecast(
         deployment_id=config.deployment_id,
         issue_time=issue_time,
         last_updated=last_updated,
-        status="ok",
-        model_versions={"temp": BASELINE_VERSION, "pop": BASELINE_VERSION},
+        status=status,
+        model_versions=model_versions,
         attribution=_ATTRIBUTION,
         series=series,
     )
@@ -92,12 +140,53 @@ def run_inference(
     observations: Mapping[str, ObservationSource],
     forecast_path: Path,
     issue_time: datetime,
+    registry_path: Path | None = None,
+    work_dir: Path | None = None,
+    fetch_bytes: Callable[[str], bytes] = lambda url: http_get_bytes(url),
 ) -> ForecastDocument:
-    """Build a snapshot -> baseline forecast -> write JSON. Stateless (ADR-0019)."""
+    """Build a snapshot → champion/baseline forecast → write JSON. Stateless (ADR-0019).
+
+    When ``registry_path`` is None (or absent), serves baseline for all tasks with status="ok".
+    status="degraded" only when an expected champion (a real registry entry) fails to load/predict.
+    """
     snapshot = build_snapshot(config, issue_time, nwp, observations)
     matrix = build_features(snapshot, config)
-    preds = baseline_predictions(matrix, config.label.precip_occurrence_threshold_mm)
-    doc = _assemble_forecast(config, preds, snapshot.issue_time, last_updated=snapshot.issue_time)
+    base = baseline_predictions(matrix, config.label.precip_occurrence_threshold_mm)
+
+    if registry_path is None:
+        doc = _assemble_forecast(
+            config,
+            base,
+            snapshot.issue_time,
+            last_updated=snapshot.issue_time,
+            model_versions={"temp": BASELINE_VERSION, "pop": BASELINE_VERSION},
+            status="ok",
+        )
+        write_forecast(doc, forecast_path)
+        return doc
+
+    manifest = _read_registry_safe(registry_path)
+    _work_dir: Path = work_dir if work_dir is not None else forecast_path.parent / ".champion_cache"
+
+    tver, tpreds, tdeg = _serve_task(
+        "temp", manifest, matrix, base, config, registry_path, _work_dir, fetch_bytes
+    )
+    pver, ppreds, pdeg = _serve_task(
+        "pop", manifest, matrix, base, config, registry_path, _work_dir, fetch_bytes
+    )
+
+    frame = base.copy()
+    frame["pred_temp_c"] = tpreds
+    frame["pred_pop"] = ppreds
+    status: Literal["ok", "degraded"] = "degraded" if (tdeg or pdeg) else "ok"
+    doc = _assemble_forecast(
+        config,
+        frame,
+        snapshot.issue_time,
+        last_updated=snapshot.issue_time,
+        model_versions={"temp": tver, "pop": pver},
+        status=status,
+    )
     write_forecast(doc, forecast_path)
     return doc
 
