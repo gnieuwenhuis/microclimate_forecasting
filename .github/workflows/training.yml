@@ -71,9 +71,16 @@ jobs:
             gh release create "champion-$base" "$f" --title "champion-$base" --notes "Promoted champion $base" 2>/dev/null \
               || gh release upload "champion-$base" "$f" --clobber
           done
-          git fetch origin gh-pages --depth 1 || true
-          git worktree add -f gp gh-pages 2>/dev/null || git worktree add -f -b gh-pages gp
+          # Base the worktree on the real remote gh-pages (preserving its content + history) so
+          # the push fast-forwards; bootstrap an orphan branch only when gh-pages doesn't exist.
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch origin gh-pages --depth 1
+            git worktree add -f --detach gp origin/gh-pages
+          else
+            git worktree add -f --detach gp
+            cd gp && git checkout --orphan gh-pages && git rm -rf . >/dev/null 2>&1 || true && cd ..
+          fi
           cp registry.json gp/registry.json
           cd gp && git add registry.json \
             && git -c user.name=ci -c user.email=ci@local commit -q -m "registry: $(date -u +%FT%TZ)" \
-            && git push origin gh-pages || echo "registry unchanged"
+            && git push origin HEAD:gh-pages || echo "registry unchanged"
