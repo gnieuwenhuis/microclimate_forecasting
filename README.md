@@ -53,12 +53,17 @@ at retrain time via the seed backfill, not during inference), and the **hourly i
 GitHub Action** (`.github/workflows/inference.yml`) that runs it per deployment
 (ADR-0017).
 
-**Not yet implemented** (currently stubs): the registry/champion-loading (trained model
-promotion via champion/challenger, ADR-0006), the publish gate (`evaluation.publish_gate`),
-the full training pipeline that wires the seed backfill into model training + the publish
-gate (`pipelines.training`), and the **gh-pages forecast-JSON publish** (the public
-live-service surface). `acis` is retained but unused (ADR-0010). The raw training store is
-**public** (`training-data` branch, ADR-0017 amending ADR-0009).
+**Training pipeline now implemented** (`pipelines/training.py`): monthly retrain runs
+seed backfill → train → champion/challenger publish gate (`evaluation.publish_gate`,
+ADR-0006) → on promotion, publishes the champion model as a GitHub Release asset and
+`registry.json` to gh-pages — with the training store persisted on the public
+`training-data` branch (ADR-0017/0018). `evaluation.publish_gate` and
+`publication.registry_store` are no longer stubs.
+
+**Remaining gap:** inference still publishes the **baseline** (`{"temp": "baseline", "pop":
+"baseline"}`); swapping the inference pipeline to load the registry/champion is the next
+slice. The **gh-pages forecast-JSON publish** (the public live-service surface) is also not
+yet wired. `acis` is retained but unused (ADR-0010).
 
 ## Develop
 

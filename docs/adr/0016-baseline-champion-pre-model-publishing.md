@@ -29,3 +29,8 @@ its snapshot to the training store (ADR-0007/0015), accumulating labels forward.
   failure once trained models depend on obs; run freshness) are deferred to later work.
 - This first slice runs in-process to local paths; the registry/champion-loading and the
   private-repo + gh-pages git sync (the GitHub Action, ADR-0009) are separate follow-on specs.
+- **Update (2026-06-03):** the *training* side is now implemented — `pipelines.training.run_training`
+  runs the champion/challenger publish gate (ADR-0006) and, on promotion, publishes the champion
+  model (GitHub Release asset) and `registry.json` (gh-pages), with the training store persisted on
+  the public `training-data` branch (ADR-0017/0018). The **inference side still reads the baseline**;
+  swapping inference to load the registry/champion remains a separate slice.
