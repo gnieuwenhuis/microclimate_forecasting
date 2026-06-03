@@ -3,9 +3,6 @@ on:
   schedule:
     - cron: "0 0 1 * *"
   workflow_dispatch:
-  push:
-    paths:
-      - "config/deployments/**"
 
 jobs:
   discover:
@@ -22,6 +19,10 @@ jobs:
   run:
     needs: discover
     runs-on: ubuntu-latest
+    permissions:
+      contents: write          # push training-data + gh-pages, create Releases
+    concurrency:
+      group: training-${{ matrix.deployment }}
     strategy:
       matrix:
         deployment: ${{ fromJson(needs.discover.outputs.deployments) }}
@@ -29,6 +30,50 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
-      - run: uv run python -m microclimate.pipelines.training --deployment ${{ matrix.deployment }}
+
+      - name: Check out (or bootstrap) the public training-data store
         env:
-          DATA_REPO_TOKEN: ${{ secrets.DATA_REPO_TOKEN }}
+          STORE_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          if git clone --depth 1 --branch training-data "$STORE_URL" store 2>/dev/null; then
+            echo "Cloned existing training-data branch."
+          else
+            echo "Bootstrapping empty training-data store."
+            mkdir store
+          fi
+
+      - name: Train + gate + stage champions
+        env:
+          TRAINING_STORE_ROOT: store
+          CHAMPION_OUTPUT_DIR: champions
+          REGISTRY_PATH: registry.json
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: uv run python -m microclimate.pipelines.training --deployment ${{ matrix.deployment }}
+
+      - name: Force-push the store state back to training-data
+        env:
+          STORE_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          cd store
+          git init -q 2>/dev/null || true
+          git checkout -q -B training-data
+          git add -A
+          git -c user.name=ci -c user.email=ci@local commit -q -m "store: $(date -u +%FT%TZ)" || { echo "no changes"; exit 0; }
+          git push -f "$STORE_URL" training-data
+
+      - name: Publish promoted champions (Release assets) + registry.json (gh-pages)
+        if: hashFiles('champions/*.joblib') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for f in champions/*.joblib; do
+            base=$(basename "$f" .joblib)
+            gh release create "champion-$base" "$f" --title "champion-$base" --notes "Promoted champion $base" 2>/dev/null \
+              || gh release upload "champion-$base" "$f" --clobber
+          done
+          git fetch origin gh-pages --depth 1 || true
+          git worktree add -f gp gh-pages 2>/dev/null || git worktree add -f -b gh-pages gp
+          cp registry.json gp/registry.json
+          cd gp && git add registry.json \
+            && git -c user.name=ci -c user.email=ci@local commit -q -m "registry: $(date -u +%FT%TZ)" \
+            && git push origin gh-pages || echo "registry unchanged"
