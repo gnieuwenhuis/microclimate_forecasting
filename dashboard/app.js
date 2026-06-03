@@ -4,9 +4,16 @@ const SUPPORTED_SCHEMA_MAJOR = "1";
 const params = new URLSearchParams(location.search);
 const DEPLOYMENT = ((params.get("deployment") || "lethbridge").toLowerCase().replace(/[^a-z0-9_-]/g, "")) || "lethbridge";
 
+// The dashboard shows a sliding window of the next WINDOW_HOURS, computed from the browser clock
+// at render time. The published JSON holds the full 48 h run; filtering client-side means the
+// window stays correct ("next 12 h from now") without re-publishing every hour.
+const WINDOW_HOURS = 12;
+
 // ---- formatters (local time) ----
 const fmtHour = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const fmtFull = (iso) => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+const fmtDay = (iso) => new Date(iso).toLocaleDateString([], { weekday: "short" });
+const dayKey = (iso) => new Date(iso).toLocaleDateString();
 const fmtT = (c) => `${Math.round(c)}°`;
 const fmtP = (p) => `${Math.round(p * 100)}%`;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -21,6 +28,17 @@ function ago(iso) {
   return `${Math.round(h / 24)} d ago`;
 }
 
+// The next WINDOW_HOURS of the forecast from now (sliding, client-side). Drops already-elapsed
+// leads so the view starts at the current hour rather than the model cycle's init time.
+function windowSeries(series) {
+  const now = Date.now();
+  const end = now + WINDOW_HOURS * 3600000;
+  return series.filter((step) => {
+    const t = Date.parse(step.valid_time);
+    return t >= now && t <= end;
+  });
+}
+
 const STATUS_MEAN = {
   ok: "Fresh — full horizon served by the latest run.",
   stale: "Published, but shorter than the target horizon (far leads weren't yet available).",
@@ -33,7 +51,7 @@ function statusPill(s) {
 
 const scaler = (min, max, lo, hi) => (v) => lo + (hi - lo) * (max === min ? 0.5 : (v - min) / (max - min));
 
-// ---- dual-axis SVG: temperature line + PoP bars (variant C) ----
+// ---- dual-axis SVG: temperature line + PoP bars, with day-transition markers ----
 function dualSVG(series, { w = 1000, h = 320, pad = { l: 38, r: 40, t: 18, b: 28 } } = {}) {
   const temps = series.map((s) => s.temp_c);
   let lo = Math.min(...temps), hi = Math.max(...temps);
@@ -65,18 +83,30 @@ function dualSVG(series, { w = 1000, h = 320, pad = { l: 38, r: 40, t: 18, b: 28
   if (lo < 0 && hi > 0) {
     grid += `<line x1="${pad.l}" y1="${yT(0)}" x2="${w - pad.r}" y2="${yT(0)}" stroke="var(--zero)" stroke-dasharray="3 3"/>`;
   }
+  // Day-transition markers: a faint vertical rule + weekday label where the local date rolls over.
+  let days = "";
+  for (let i = 1; i < series.length; i++) {
+    if (dayKey(series[i].valid_time) !== dayKey(series[i - 1].valid_time)) {
+      const dx = x(i);
+      days += `<line x1="${dx.toFixed(1)}" y1="${pad.t}" x2="${dx.toFixed(1)}" y2="${h - pad.b}" stroke="var(--zero)" stroke-dasharray="2 3" opacity=".75"/>`;
+      days += `<text x="${(dx + 4).toFixed(1)}" y="${pad.t + 10}" font-size="10" font-weight="600" fill="var(--muted)">${fmtDay(series[i].valid_time)}</text>`;
+    }
+  }
+  // x-axis time labels: ~6 across regardless of window length.
+  const xstep = Math.max(1, Math.ceil(series.length / 6));
   let xl = "";
-  for (let i = 0; i < series.length; i += 6) {
+  for (let i = 0; i < series.length; i += xstep) {
     xl += `<text x="${x(i)}" y="${h - 8}" text-anchor="middle" font-size="10" fill="var(--muted)">${fmtHour(series[i].valid_time)}</text>`;
   }
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="none" style="height:${h}px">${grid}${bars}<path d="${dLine}" fill="none" stroke="var(--temp)" stroke-width="2.5" stroke-linejoin="round"/>${xl}</svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="none" style="height:${h}px">${grid}${days}${bars}<path d="${dLine}" fill="none" stroke="var(--temp)" stroke-width="2.5" stroke-linejoin="round"/>${xl}</svg>`;
 }
 
-// ---- full view (A-header + C body) ----
-function view(doc) {
-  const s = doc.series;
-  const now = s.find((x) => x.lead_hour === 1) || s[0];
-  const rows = s
+// ---- full view (A-header + C body). `win` is the windowed series (next WINDOW_HOURS). ----
+function view(doc, win) {
+  const next = win[0]; // soonest upcoming hour
+  const dh = Math.round((Date.parse(next.valid_time) - Date.now()) / 3600000);
+  const whenLabel = dh <= 0 ? "this hour" : `in ${dh} h`;
+  const rows = win
     .map(
       (x) => `<tr>
       <td class="muted">+${x.lead_hour}</td>
@@ -98,25 +128,26 @@ function view(doc) {
     ${statusPill(doc.status)}
   </header>
   <section class="now">
-    <div class="big temp">${fmtT(now.temp_c)}</div>
-    <div class="now-sub muted">in ${now.lead_hour} h<br><b>${fmtP(now.pop)}</b> chance of precip</div>
+    <div class="big temp">${fmtT(next.temp_c)}</div>
+    <div class="now-sub muted">${fmtHour(next.valid_time)} · ${whenLabel}<br><b>${fmtP(next.pop)}</b> chance of precip</div>
   </section>
   <section class="panel chart">
     <div class="legend muted"><span class="temp">— temperature</span> &nbsp; <span class="pop">▮ precip probability</span></div>
-    ${dualSVG(s)}
+    ${dualSVG(win)}
   </section>
   <section class="panel meta">
     <dl>
       <dt>Status</dt><dd>${statusPill(doc.status)}</dd>
       <dt>Issued</dt><dd>${fmtFull(doc.issue_time)}</dd>
       <dt>Updated</dt><dd>${ago(doc.last_updated)}</dd>
-      <dt>Horizon</dt><dd>${s.length} / 48 h</dd>
+      <dt>Showing</dt><dd>next ${WINDOW_HOURS} h</dd>
+      <dt>Run horizon</dt><dd>${doc.series.length} / 48 h</dd>
       <dt>Schema</dt><dd>${esc(doc.schema_version)}</dd>
     </dl>
     <div class="models">${models}</div>
   </section>
   <section class="panel">
-    <div class="table-head">Hourly values (${s.length})</div>
+    <div class="table-head">Next ${WINDOW_HOURS} hours (${win.length})</div>
     <div class="table-wrap"><table class="hourly">
       <thead><tr><th>Lead</th><th>Valid (local)</th><th>Temp</th><th>Precip</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -145,7 +176,12 @@ async function load() {
       message("No forecast steps available.");
       return;
     }
-    document.getElementById("app").innerHTML = view(doc);
+    const win = windowSeries(doc.series);
+    if (win.length === 0) {
+      message("No upcoming forecast hours — the latest run is stale.");
+      return;
+    }
+    document.getElementById("app").innerHTML = view(doc, win);
   } catch (e) {
     message("Forecast unavailable.");
     console.error(e);
