@@ -55,6 +55,10 @@ jobs:
         env:
           PAGES_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         run: |
+          # Publish the static dashboard alongside the forecast JSON so gh-pages serves the
+          # dashboard (not the rendered README). .nojekyll disables Jekyll on Pages.
+          cp dashboard/index.html dashboard/app.js dashboard/styles.css gp/
+          touch gp/.nojekyll
           cd gp
           git init -q 2>/dev/null || true
           git add -A

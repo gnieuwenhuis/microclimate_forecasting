@@ -71,6 +71,8 @@ producer. The **hourly inference GitHub Action** also **publishes the forecast J
 gh-pages** (the public live-service surface). The full **train → publish (Release +
 `registry.json`) → serve** loop is now closed. `acis` is retained but unused (ADR-0010).
 
+**Dashboard:** redesigned static thin client (`dashboard/`), auto-deployed to gh-pages by the hourly inference workflow; renders the published forecast (chart + hourly table + status/model metadata).
+
 ## Develop
 
 ```bash
