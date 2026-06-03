@@ -186,6 +186,7 @@ function drawChart() {
   box.innerHTML = dualSVG(_win, { w });
 }
 addEventListener("resize", drawChart);
+addEventListener("orientationchange", drawChart);
 
 async function load() {
   try {
