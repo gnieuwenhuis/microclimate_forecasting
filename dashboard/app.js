@@ -39,14 +39,26 @@ function windowSeries(series) {
   });
 }
 
-const STATUS_MEAN = {
-  ok: "Fresh — full horizon served by the latest run.",
-  stale: "Published, but shorter than the target horizon (far leads weren't yet available).",
-  degraded: "An expected champion model was unusable; a baseline served instead.",
-};
-function statusPill(s) {
-  const cls = STATUS_MEAN[s] ? s : "stale";
-  return `<span class="pill ${cls}" title="${STATUS_MEAN[s] || ""}"><span class="dot"></span>${esc(s)}</span>`;
+// A run older than this (≈3 missed hourly updates) is flagged "Delayed".
+const FRESH_MAX_MIN = 180;
+
+// Viewer-relative status: what the person looking at the next-WINDOW_HOURS view cares about —
+// is it fresh and does it cover the window? This is deliberately NOT the published run-quality
+// `status` (whose "stale" means horizon-truncated below 48 h, irrelevant to a 12 h view).
+function displayStatus(doc) {
+  const ageMin = (Date.now() - Date.parse(doc.last_updated)) / 60000;
+  const lastLead = Date.parse(doc.series[doc.series.length - 1].valid_time);
+  const coversWindow = lastLead >= Date.now() + WINDOW_HOURS * 3600000;
+  if (doc.status === "degraded") {
+    return { cls: "degraded", label: "Degraded", title: "A model fell back to baseline — an expected champion was unusable." };
+  }
+  if (ageMin > FRESH_MAX_MIN || !coversWindow) {
+    return { cls: "stale", label: "Delayed", title: `Last updated ${ago(doc.last_updated)}; the hourly update may be behind.` };
+  }
+  return { cls: "ok", label: "Live", title: `Fresh — updated ${ago(doc.last_updated)}, covering the next ${WINDOW_HOURS} h.` };
+}
+function pill(d) {
+  return `<span class="pill ${d.cls}" title="${d.title}"><span class="dot"></span>${d.label}</span>`;
 }
 
 const scaler = (min, max, lo, hi) => (v) => lo + (hi - lo) * (max === min ? 0.5 : (v - min) / (max - min));
@@ -104,8 +116,7 @@ function dualSVG(series, { w = 1000, h = 320, pad = { l: 38, r: 40, t: 18, b: 28
 // ---- full view (A-header + C body). `win` is the windowed series (next WINDOW_HOURS). ----
 function view(doc, win) {
   const next = win[0]; // soonest upcoming hour
-  const dh = Math.max(0, Math.ceil((Date.parse(next.valid_time) - Date.now()) / 3600000));
-  const whenLabel = dh <= 0 ? "this hour" : `in ${dh} h`;
+  const disp = displayStatus(doc);
   const rows = win
     .map(
       (x) => `<tr>
@@ -125,11 +136,11 @@ function view(doc, win) {
       <h1>${esc(cap(doc.deployment_id))}</h1>
       <div class="muted sub">Issued ${fmtFull(doc.issue_time)} · updated ${ago(doc.last_updated)}</div>
     </div>
-    ${statusPill(doc.status)}
+    ${pill(disp)}
   </header>
   <section class="now">
     <div class="big temp">${fmtT(next.temp_c)}</div>
-    <div class="now-sub muted">${fmtHour(next.valid_time)} · ${whenLabel}<br><b>${fmtP(next.pop)}</b> chance of precip</div>
+    <div class="now-sub muted">Forecast for ${fmtHour(next.valid_time)}<br><b>${fmtP(next.pop)}</b> chance of precip</div>
   </section>
   <section class="panel chart">
     <div class="legend muted"><span class="temp">— temperature</span> &nbsp; <span class="pop">▮ precip probability</span></div>
@@ -137,7 +148,7 @@ function view(doc, win) {
   </section>
   <section class="panel meta">
     <dl>
-      <dt>Status</dt><dd>${statusPill(doc.status)}</dd>
+      <dt>Status</dt><dd>${pill(disp)}</dd>
       <dt>Issued</dt><dd>${fmtFull(doc.issue_time)}</dd>
       <dt>Updated</dt><dd>${ago(doc.last_updated)}</dd>
       <dt>Showing</dt><dd>next ${WINDOW_HOURS} h</dd>

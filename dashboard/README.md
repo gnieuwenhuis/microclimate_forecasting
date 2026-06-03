@@ -15,5 +15,12 @@ run; filtering client-side keeps the window correct ("next 12 h from now") witho
 every hour, and drops already-elapsed leads (the run's `issue_time` can be several hours old — see
 ADR-0019 on HRDPS publish lag).
 
+The **status pill is viewer-relative**, not the published `status` field: green **Live** when the
+run is fresh (`last_updated` within `FRESH_MAX_MIN`) and covers the full window, amber **Delayed**
+when it's behind or doesn't cover the window, red **Degraded** when a model fell back to baseline.
+The published `status` ("stale" = horizon truncated below 48 h, per ADR-0019) is a run-quality
+signal that's irrelevant to a 12 h view; the run's coverage is instead shown plainly as the
+"Run horizon: N / 48 h" metadata row.
+
 Accepts any forecast whose `schema_version` major is **1** (`SUPPORTED_SCHEMA_MAJOR`). No build
 step, no secrets, no raw observations — only the derived forecast document (ADR-0009).
