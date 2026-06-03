@@ -10,6 +10,7 @@ const fmtFull = (iso) => new Date(iso).toLocaleString([], { weekday: "short", ho
 const fmtT = (c) => `${Math.round(c)}°`;
 const fmtP = (p) => `${Math.round(p * 100)}%`;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 function ago(iso) {
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -27,7 +28,7 @@ const STATUS_MEAN = {
 };
 function statusPill(s) {
   const cls = STATUS_MEAN[s] ? s : "stale";
-  return `<span class="pill ${cls}" title="${STATUS_MEAN[s] || ""}"><span class="dot"></span>${s}</span>`;
+  return `<span class="pill ${cls}" title="${STATUS_MEAN[s] || ""}"><span class="dot"></span>${esc(s)}</span>`;
 }
 
 const scaler = (min, max, lo, hi) => (v) => lo + (hi - lo) * (max === min ? 0.5 : (v - min) / (max - min));
@@ -86,12 +87,12 @@ function view(doc) {
     )
     .join("");
   const models = Object.entries(doc.model_versions)
-    .map(([t, v]) => `<div><span class="mtask">${t}</span> <span class="badge ${v !== "baseline" ? "champ" : ""}">${v}</span></div>`)
+    .map(([t, v]) => `<div><span class="mtask">${esc(t)}</span> <span class="badge ${v !== "baseline" ? "champ" : ""}">${esc(v)}</span></div>`)
     .join("");
   return `
   <header class="head">
     <div>
-      <h1>${cap(doc.deployment_id)}</h1>
+      <h1>${esc(cap(doc.deployment_id))}</h1>
       <div class="muted sub">Issued ${fmtFull(doc.issue_time)} · updated ${ago(doc.last_updated)}</div>
     </div>
     ${statusPill(doc.status)}
@@ -110,7 +111,7 @@ function view(doc) {
       <dt>Issued</dt><dd>${fmtFull(doc.issue_time)}</dd>
       <dt>Updated</dt><dd>${ago(doc.last_updated)}</dd>
       <dt>Horizon</dt><dd>${s.length} / 48 h</dd>
-      <dt>Schema</dt><dd>${doc.schema_version}</dd>
+      <dt>Schema</dt><dd>${esc(doc.schema_version)}</dd>
     </dl>
     <div class="models">${models}</div>
   </section>
@@ -121,7 +122,7 @@ function view(doc) {
       <tbody>${rows}</tbody>
     </table></div>
   </section>
-  <footer class="attrib">${doc.attribution.map((a) => `<div>${a}</div>`).join("")}</footer>`;
+  <footer class="attrib">${doc.attribution.map((a) => `<div>${esc(a)}</div>`).join("")}</footer>`;
 }
 
 function message(html) {
