@@ -38,7 +38,25 @@ from microclimate.pipelines.training_data import assemble_from_store, chronologi
 from microclimate.training_store.store import TrainingStore
 
 DEPLOYMENT_ID = "lethbridge"
-ARTIFACTS = Path("notebooks/_artifacts")
+
+
+def _repo_root() -> Path:
+    """Repo root (dir with pyproject.toml), so artifact paths work from any kernel CWD.
+
+    Jupyter/VS Code often run the kernel from ``notebooks/``, not the repo root, which would
+    make a relative ``notebooks/_artifacts`` resolve to ``notebooks/notebooks/_artifacts``.
+    """
+    try:
+        start = Path(__file__).resolve()
+    except NameError:  # __file__ is undefined in some interactive kernels
+        start = Path.cwd().resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return Path.cwd()
+
+
+ARTIFACTS = _repo_root() / "notebooks" / "_artifacts"
 
 # %%
 config = load_deployment(DEPLOYMENT_ID)
