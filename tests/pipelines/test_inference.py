@@ -264,3 +264,28 @@ def test_latest_hrdps_issue_time_floors_to_published_6h_cycle() -> None:
     assert _latest_hrdps_issue_time(datetime(2026, 6, 1, 14, 0)) == datetime(
         2026, 6, 1, 6, 0, tzinfo=UTC
     )
+
+
+def test_corrupt_champion_asset_is_degraded(tmp_path: Path) -> None:
+    """A non-ConnectorError load failure (corrupt/truncated joblib) must still degrade, not dark."""
+    config, nwp, obs = _make_fakes()
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    entry = RegistryEntry(
+        version="lethbridge-temp-corrupt",
+        release_asset_url="https://example/corrupt.joblib",
+        promoted_at=datetime(2026, 6, 3, tzinfo=UTC),
+        holdout_metrics={},
+    )
+    reg = _registry_with(tmp_path, {manifest_key("test", "temp"): entry})
+    doc = run_inference(
+        config,
+        nwp=nwp,
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+        registry_path=reg,
+        work_dir=tmp_path / "wd",
+        fetch_bytes=lambda _u: b"not a real joblib",
+    )
+    assert doc.status == "degraded"
+    assert doc.model_versions["temp"] == "baseline"

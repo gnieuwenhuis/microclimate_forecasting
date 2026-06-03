@@ -18,7 +18,7 @@ import pandas as pd
 
 from microclimate.config.loader import load_deployment
 from microclimate.config.schema import DeploymentConfig
-from microclimate.connectors.base import ConnectorError, NWPSource, ObservationSource
+from microclimate.connectors.base import NWPSource, ObservationSource
 from microclimate.connectors.http import http_get_bytes
 from microclimate.connectors.registry import get_source
 from microclimate.contracts.forecast import FORECAST_SCHEMA_VERSION, ForecastDocument, ForecastStep
@@ -82,20 +82,34 @@ def _serve_task(
     entry = manifest.entries.get(manifest_key(config.deployment_id, task))
     if entry is None or entry.version == "baseline":
         return BASELINE_VERSION, base[base_col], False
+
+    # Loading an expected champion is downloading + deserializing an external, untrusted asset:
+    # ANY failure (network, truncated/corrupt joblib -> EOFError/UnpicklingError/KeyError, etc.)
+    # must degrade to baseline, never dark the hourly product.
     try:
         champion = load_champion(
             config.deployment_id, registry_path, task, work_dir, fetch_bytes=fetch_bytes
         )
-        if champion is None:
-            return BASELINE_VERSION, base[base_col], False
-        preds = champion.predict(matrix)
-        return entry.version, preds, False
-    except (ConnectorError, ValueError, OSError) as exc:
+    except Exception as exc:  # noqa: BLE001 — expected-champion load failure must fall back
         print(
-            f"inference: champion '{entry.version}' unusable for {task} "
+            f"inference: champion '{entry.version}' failed to load for {task} "
             f"({type(exc).__name__}: {exc}); using baseline"
         )
         return BASELINE_VERSION, base[base_col], True
+    if champion is None:  # entry vanished between reads — not degraded
+        return BASELINE_VERSION, base[base_col], False
+
+    # Prediction: a stale feature_schema_version is refused (ValueError) -> degraded baseline.
+    # Other errors (e.g. KeyError from a missing feature column) are real bugs -> propagate loud.
+    try:
+        preds = champion.predict(matrix)
+    except ValueError as exc:
+        print(
+            f"inference: champion '{entry.version}' refused for {task} "
+            f"({type(exc).__name__}: {exc}); using baseline"
+        )
+        return BASELINE_VERSION, base[base_col], True
+    return entry.version, preds, False
 
 
 def _assemble_forecast(

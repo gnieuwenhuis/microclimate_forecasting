@@ -59,7 +59,18 @@ jobs:
           git init -q 2>/dev/null || true
           git add -A
           git -c user.name=ci -c user.email=ci@local commit -q -m "forecast: $(date -u +%FT%TZ)" || { echo "no changes"; exit 0; }
-          # Non-force: gh-pages is shared with training.yml (registry.json). A concurrent registry
-          # push makes this non-fast-forward and the push is rejected — fail safe, the next hourly
-          # run republishes from a fresh clone rather than clobbering the registry.
-          git push "$PAGES_URL" HEAD:gh-pages || echo "forecast push rejected (concurrent gh-pages update); retrying next hour"
+          # Non-force: gh-pages is shared with training.yml (registry.json). Tolerate ONLY a
+          # non-fast-forward rejection (a concurrent gh-pages update) — the next hourly run
+          # republishes from a fresh clone. Any other failure (auth, network) must fail loudly.
+          set +e
+          push_err="$(git push "$PAGES_URL" HEAD:gh-pages 2>&1)"; push_rc=$?
+          set -e
+          echo "$push_err"
+          if [ "$push_rc" -ne 0 ]; then
+            if echo "$push_err" | grep -qiE "non-fast-forward|fetch first|\[rejected\]"; then
+              echo "::warning::gh-pages push rejected by a concurrent update; retries next hour"
+            else
+              echo "::error::gh-pages push failed (not a concurrency rejection)"
+              exit 1
+            fi
+          fi
