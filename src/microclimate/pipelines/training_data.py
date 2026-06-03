@@ -10,16 +10,18 @@ from build_snapshot/build_features, preserving the ADR-0011 no-leakage guarantee
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 
 from microclimate.config.schema import DeploymentConfig
 from microclimate.connectors.base import NWPSource, ObservationSource
+from microclimate.connectors.caching import CachingObservationSource
 from microclimate.features.feature_builder import build_features
 from microclimate.features.labeler import attach_labels
 from microclimate.features.snapshot_builder import build_snapshot
+from microclimate.training_store.store import TrainingStore
 
 
 def assemble_training_rows(
@@ -29,16 +31,43 @@ def assemble_training_rows(
     issue_times: Iterable[datetime],
 ) -> pd.DataFrame:
     """Build a labeled feature matrix spanning all given issue_times."""
-    matrices: list[pd.DataFrame] = []
-    for issue_time in issue_times:
-        snapshot = build_snapshot(config, issue_time, nwp, observations)
-        matrices.append(build_features(snapshot, config))
-    if not matrices:
+    times = list(issue_times)
+    if not times:
         raise ValueError("issue_times is empty; nothing to assemble")
+
+    # Prefetch each station's full observation window once and serve as-of slices from memory,
+    # so a multi-issue-time assembly does O(stations) obs fetches instead of O(issue_times) — the
+    # same optimisation backfill_store uses. The window covers the lagged as-of reads and the
+    # forward label read (valid_time up to max issue_time + horizon). Only worth doing when the
+    # observation feature group is on (otherwise build_snapshot reads no station obs at all, and
+    # only the single target label read below is needed).
+    obs: Mapping[str, ObservationSource] = observations
+    if config.feature_groups.observations:
+        win_start = min(times) - timedelta(hours=config.lag_hours)
+        win_end = max(times) + timedelta(hours=config.horizon_hours)
+        obs = {
+            key: CachingObservationSource(
+                src,
+                [
+                    r.station_id
+                    for r in (config.target, *config.neighbors)
+                    if r.connector_key == key
+                ],
+                win_start,
+                win_end,
+            )
+            for key, src in observations.items()
+        }
+
+    matrices: list[pd.DataFrame] = []
+    for issue_time in times:
+        snapshot = build_snapshot(config, issue_time, nwp, obs)
+        matrices.append(build_features(snapshot, config))
     matrix = pd.concat(matrices, ignore_index=True)
 
-    # Single batched future read of the target station across the whole valid-time span.
-    target_source = observations[config.target.connector_key]
+    # Single batched future read of the target station across the whole valid-time span (served
+    # from the prefetch cache when the observation group is on, else a direct one-shot read).
+    target_source = obs[config.target.connector_key]
     start = matrix["valid_time"].min().to_pydatetime()
     end = matrix["valid_time"].max().to_pydatetime()
     target_obs = target_source.fetch_historical(config.target.station_id, start, end)
@@ -68,6 +97,32 @@ def assemble_or_load(
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     rows.to_parquet(cache_path, index=False)
     return rows
+
+
+def assemble_from_store(config: DeploymentConfig, store: TrainingStore) -> pd.DataFrame:
+    """Build the labeled feature matrix from persisted store snapshots + labels (no network).
+
+    The store-backed counterpart to ``assemble_training_rows``: it re-derives features from each
+    stored ``FeatureSnapshot`` (``build_features``) and rejoins the labels written during the
+    seed backfill, on ``(issue_time, lead_hour)``. Output columns match the live-assembly path,
+    so it feeds ``chronological_split`` and the models identically — but is local, fast, and
+    repeatable (the network pull happened once, in ``backfill_store``).
+    """
+    snapshots = store.read_snapshots(config.deployment_id)
+    if not snapshots:
+        raise ValueError(f"training store has no snapshots for {config.deployment_id!r}")
+    matrix = pd.concat(
+        [build_features(snapshot, config) for snapshot in snapshots], ignore_index=True
+    )
+    matrix["issue_time"] = pd.to_datetime(matrix["issue_time"], utc=True)
+
+    labels = store.read_labels(config.deployment_id)
+    if labels.empty:
+        raise ValueError(f"training store has no labels for {config.deployment_id!r}")
+    labels = labels.copy()
+    labels["issue_time"] = pd.to_datetime(labels["issue_time"], utc=True)
+    label_cols = ["issue_time", "lead_hour", "label_temp_c", "label_precip_occurrence"]
+    return matrix.merge(labels[label_cols], on=["issue_time", "lead_hour"], how="left")
 
 
 def chronological_split(

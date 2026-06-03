@@ -14,11 +14,11 @@ import pandas as pd
 from microclimate.config.schema import DeploymentConfig
 from microclimate.connectors.base import (
     ForecastUnavailable,
-    HistoricalCoverage,
     NWPSource,
     ObservationSource,
     SourceUnavailable,
 )
+from microclimate.connectors.caching import CachingObservationSource
 from microclimate.contracts.snapshot import FeatureSnapshot
 from microclimate.features.feature_builder import build_features
 from microclimate.features.labeler import attach_labels
@@ -28,40 +28,6 @@ from microclimate.training_store.store import TrainingStore
 _RUN_HOURS: tuple[int, ...] = (0, 6, 12, 18)
 
 _LABEL_COLS = ["issue_time", "lead_hour", "valid_time", "label_temp_c", "label_precip_occurrence"]
-
-
-class _CachingObservationSource(ObservationSource):
-    """Backfill-only: prefetch each station's full window once, serve as-of slices from memory.
-
-    Eliminates the per-issue-time obs re-download in a deep backfill — net network volume
-    becomes ~one obs fetch per station plus the NWP fetches.
-    """
-
-    def __init__(
-        self,
-        inner: ObservationSource,
-        station_ids: Sequence[str],
-        start: datetime,
-        end: datetime,
-    ) -> None:
-        self._inner = inner
-        self._cache: dict[str, pd.DataFrame] = {
-            sid: inner.fetch_historical(sid, start, end) for sid in station_ids
-        }
-
-    @property
-    def historical_coverage(self) -> HistoricalCoverage:
-        return self._inner.historical_coverage
-
-    def fetch_historical(self, station_id: str, start: datetime, end: datetime) -> pd.DataFrame:
-        df = self._cache.get(station_id)
-        if df is None:
-            return self._inner.fetch_historical(station_id, start, end)
-        s, e = pd.Timestamp(start), pd.Timestamp(end)
-        return df[(df["timestamp"] >= s) & (df["timestamp"] <= e)].reset_index(drop=True)
-
-    def fetch_live(self, station_id: str, since: datetime) -> pd.DataFrame:
-        raise NotImplementedError("caching wrapper is backfill-only")
 
 
 def hrdps_issue_times(start: datetime, end: datetime) -> list[datetime]:
@@ -85,7 +51,7 @@ def backfill_store(
     store: TrainingStore,
     issue_times: Sequence[datetime],
     pause_s: float = 0.12,  # throttles the per-issue-time NWP request; obs are prefetched once
-    # per station (see _CachingObservationSource), so NWP dominates
+    # per station (see CachingObservationSource), so NWP dominates
 ) -> int:
     """Build + persist snapshots and labels for each issue_time. Returns count newly written.
 
@@ -105,7 +71,7 @@ def backfill_store(
                 for ref in (config.target, *config.neighbors)
                 if ref.connector_key == key
             ]
-            cached[key] = _CachingObservationSource(src, ids_for_key, win_start, win_end)
+            cached[key] = CachingObservationSource(src, ids_for_key, win_start, win_end)
         obs = cached
 
     fresh_snapshots: list[FeatureSnapshot] = []

@@ -14,17 +14,18 @@
 # Thin notebook: all logic lives in `microclimate.*` (tested) and is exercised by the CI
 # smoke test. This file only orchestrates and plots. Open it as a notebook with jupytext or
 # VS Code. Requires the `notebook` dependency group: `uv sync --group notebook`.
-# CaSPAr historical access must be configured for the chosen deployment.
+#
+# Reads the persisted training store, which must be backfilled first (one-time network pull):
+#   uv run python -m microclimate.pipelines.backfill --deployment lethbridge   # once wired, or
+#   call microclimate.pipelines.backfill.backfill_store(...) over the seed window (ADR-0019).
 
 # %%
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
 
 from microclimate.config.loader import load_deployment
-from microclimate.connectors.registry import get_source
 from microclimate.evaluation.metrics import (
     nwp_pop_baseline,
     pop_skill_by_lead,
@@ -33,28 +34,36 @@ from microclimate.evaluation.metrics import (
 )
 from microclimate.models.pop_model import PrecipOccurrenceClassifier
 from microclimate.models.temp_model import TemperatureRegressor
-from microclimate.pipelines.training_data import assemble_or_load, chronological_split
+from microclimate.pipelines.training_data import assemble_from_store, chronological_split
+from microclimate.training_store.store import TrainingStore
 
 DEPLOYMENT_ID = "lethbridge"
-START = datetime(2024, 1, 1, 0, tzinfo=UTC)
-N_ISSUE_TIMES = 24 * 60  # ~60 days of hourly issue times
-ARTIFACTS = Path("notebooks/_artifacts")
+
+
+def _repo_root() -> Path:
+    """Repo root (dir with pyproject.toml), so artifact paths work from any kernel CWD.
+
+    Jupyter/VS Code often run the kernel from ``notebooks/``, not the repo root, which would
+    make a relative ``notebooks/_artifacts`` resolve to ``notebooks/notebooks/_artifacts``.
+    """
+    try:
+        start = Path(__file__).resolve()
+    except NameError:  # __file__ is undefined in some interactive kernels
+        start = Path.cwd().resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return Path.cwd()
+
+
+ARTIFACTS = _repo_root() / "notebooks" / "_artifacts"
 
 # %%
 config = load_deployment(DEPLOYMENT_ID)
-nwp = get_source(config.nwp.historical_connector)
-station_keys = {config.target.connector_key, *[n.connector_key for n in config.neighbors]}
-observations = {k: get_source(k) for k in station_keys}  # type: ignore[misc]
-issue_times = [START + timedelta(hours=i) for i in range(N_ISSUE_TIMES)]
+store = TrainingStore(ARTIFACTS / "training-store")
 
-# %%
-rows = assemble_or_load(
-    config,
-    nwp,
-    observations,
-    issue_times,  # type: ignore[arg-type]
-    cache_path=ARTIFACTS / f"{DEPLOYMENT_ID}_rows.parquet",
-)
+# Repeatable, no-network read of the backfilled store (snapshot -> features + joined labels).
+rows = assemble_from_store(config, store)
 print(f"{len(rows):,} rows  |  {rows['issue_time'].nunique()} issue times")
 rows.head()
 

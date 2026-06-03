@@ -206,3 +206,58 @@ def test_backfill_obs_prefetched_once_per_station(tmp_path: Path) -> None:
         assert call_counts.get(sid, 0) == 1, (
             f"station {sid!r} was fetched {call_counts.get(sid, 0)} times; expected 1"
         )
+
+
+def test_assemble_training_rows_obs_prefetched_once_per_station() -> None:
+    """assemble_training_rows must fetch obs once per station, not once per issue_time (caching)."""
+    from microclimate.config.loader import load_deployment
+    from microclimate.pipelines.backfill import hrdps_issue_times
+    from microclimate.pipelines.training_data import assemble_training_rows
+
+    config = load_deployment("lethbridge")
+
+    call_counts: dict[str, int] = {}
+
+    class _CountingObs(_FakeObs):
+        def fetch_historical(self, station_id: str, start: datetime, end: datetime) -> pd.DataFrame:
+            call_counts[station_id] = call_counts.get(station_id, 0) + 1
+            return super().fetch_historical(station_id, start, end)
+
+    obs_map: dict[str, ObservationSource] = {config.target.connector_key: _CountingObs()}
+    times = hrdps_issue_times(
+        datetime(2024, 1, 1, 0, 0, tzinfo=UTC), datetime(2024, 1, 1, 18, 0, tzinfo=UTC)
+    )  # 4 issue_times
+
+    rows = assemble_training_rows(config, _FakeNWP(), obs_map, times)
+    assert len(rows) == len(times) * config.horizon_hours
+
+    all_station_ids = [config.target.station_id, *(n.station_id for n in config.neighbors)]
+    for sid in all_station_ids:
+        assert call_counts.get(sid, 0) == 1, (
+            f"station {sid!r} fetched {call_counts.get(sid, 0)} times; expected 1"
+        )
+
+
+def test_assemble_from_store_matches_backfilled_rows(tmp_path: Path) -> None:
+    """assemble_from_store rebuilds labeled rows from persisted snapshots + labels."""
+    from microclimate.config.loader import load_deployment
+    from microclimate.pipelines.backfill import backfill_store, hrdps_issue_times
+    from microclimate.pipelines.training_data import assemble_from_store
+    from microclimate.training_store.store import TrainingStore
+
+    config = load_deployment("lethbridge")
+    store = TrainingStore(tmp_path)
+    obs_map: dict[str, ObservationSource] = {config.target.connector_key: _FakeObs()}
+    times = hrdps_issue_times(
+        datetime(2024, 1, 1, 0, 0, tzinfo=UTC), datetime(2024, 1, 1, 18, 0, tzinfo=UTC)
+    )
+    backfill_store(
+        config, nwp=_FakeNWP(), observations=obs_map, store=store, issue_times=times, pause_s=0.0
+    )
+
+    rows = assemble_from_store(config, store)
+    assert len(rows) == len(times) * config.horizon_hours
+    assert {"label_temp_c", "label_precip_occurrence", "lead_hour", "issue_time"} <= set(
+        rows.columns
+    )
+    assert rows["label_temp_c"].notna().all()  # fake obs covers every valid_time
