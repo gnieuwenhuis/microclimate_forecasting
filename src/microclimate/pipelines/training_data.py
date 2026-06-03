@@ -125,6 +125,37 @@ def assemble_from_store(config: DeploymentConfig, store: TrainingStore) -> pd.Da
     return matrix.merge(labels[label_cols], on=["issue_time", "lead_hour"], how="left")
 
 
+def temporal_split(
+    rows: pd.DataFrame,
+    *,
+    holdout_months: int,
+    calib_months: int = 3,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split by whole issue_time into train | calib | test using calendar-month cutoffs.
+
+    test  = issue_time within the most recent ``holdout_months`` (the evaluation holdout).
+    calib = the ``calib_months`` immediately before test (disjoint PoP calibration slice).
+    train = everything before calib.
+    Raises ValueError if any slice is empty (too little history).
+    """
+    if rows.empty:
+        raise ValueError("rows is empty; nothing to split")
+    issue = pd.to_datetime(rows["issue_time"], utc=True)
+    last = issue.max()
+    test_cut = last - pd.DateOffset(months=holdout_months)
+    calib_cut = test_cut - pd.DateOffset(months=calib_months)
+
+    train = rows[issue <= calib_cut]
+    calib = rows[(issue > calib_cut) & (issue <= test_cut)]
+    test = rows[issue > test_cut]
+    if train.empty or calib.empty or test.empty:
+        raise ValueError(
+            f"too little history for holdout_months={holdout_months}, "
+            f"calib_months={calib_months}: train={len(train)} calib={len(calib)} test={len(test)}"
+        )
+    return train.copy(), calib.copy(), test.copy()
+
+
 def chronological_split(
     rows: pd.DataFrame,
     *,

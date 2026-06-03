@@ -18,3 +18,8 @@ __pycache__/
 notebooks/_artifacts/
 notebooks/*.ipynb
 .claude/scheduled_tasks.lock
+
+# local training-pipeline artifact roots (default TRAINING_STORE_ROOT / CHAMPION_OUTPUT_DIR / REGISTRY_PATH)
+training-store/
+champions/
+/registry.json
