@@ -10,7 +10,7 @@ jobs:
     outputs:
       deployments: ${{ steps.list.outputs.deployments }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - id: list
         run: |
           ids=$(ls config/deployments/*.yml | xargs -n1 basename | sed 's/\.yml$//' | jq -R . | jq -cs .)
@@ -31,8 +31,8 @@ jobs:
       matrix:
         deployment: ${{ fromJson(needs.discover.outputs.deployments) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync
 
       - name: Check out (or bootstrap) the public training-data store
