@@ -17,13 +17,31 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: gh-pages-publish      # gh-pages is shared (also written by training.yml)
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
 
-      - name: Run inference for each deployment
+      - name: Check out (or bootstrap) gh-pages
+        env:
+          PAGES_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          if git clone --depth 1 --branch gh-pages "$PAGES_URL" gp 2>/dev/null; then
+            echo "Cloned gh-pages."
+          else
+            echo "Bootstrapping empty gh-pages."
+            mkdir gp
+          fi
+
+      - name: Run inference for each deployment (into gh-pages worktree)
+        env:
+          FORECAST_OUTPUT_ROOT: gp
+          REGISTRY_PATH: gp/registry.json
         run: |
           set -euo pipefail
           for f in config/deployments/*.yml; do
@@ -32,3 +50,16 @@ jobs:
             uv run python -m microclimate.pipelines.inference --deployment "$id"
             echo "::endgroup::"
           done
+
+      - name: Publish forecast JSON to gh-pages
+        env:
+          PAGES_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          cd gp
+          git init -q 2>/dev/null || true
+          git add -A
+          git -c user.name=ci -c user.email=ci@local commit -q -m "forecast: $(date -u +%FT%TZ)" || { echo "no changes"; exit 0; }
+          # Non-force: gh-pages is shared with training.yml (registry.json). A concurrent registry
+          # push makes this non-fast-forward and the push is rejected — fail safe, the next hourly
+          # run republishes from a fresh clone rather than clobbering the registry.
+          git push "$PAGES_URL" HEAD:gh-pages || echo "forecast push rejected (concurrent gh-pages update); retrying next hour"

@@ -8,6 +8,7 @@ status="degraded" only when an expected champion (a real registry entry) can't b
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -202,12 +203,18 @@ def main() -> None:
     observations = {k: cast(ObservationSource, get_source(k)) for k in station_keys}
     issue_time = _latest_hrdps_issue_time(datetime.now(UTC))
 
+    root = Path(os.environ.get("FORECAST_OUTPUT_ROOT", "."))
+    registry_path = Path(os.environ.get("REGISTRY_PATH", str(root / "registry.json")))
+    work_dir = Path(os.environ.get("CHAMPION_CACHE_DIR", ".champion-cache"))
+
     run_inference(
         config,
         nwp=nwp,
         observations=observations,
-        forecast_path=Path(config.output.forecast_json),
+        forecast_path=root / config.output.forecast_json,
         issue_time=issue_time,
+        registry_path=registry_path,
+        work_dir=work_dir,
     )
 
 
