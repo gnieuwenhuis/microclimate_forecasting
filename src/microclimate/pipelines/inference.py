@@ -165,6 +165,7 @@ def run_inference(
     status="degraded" only when an expected champion (a real registry entry) fails to load/predict.
     """
     snapshot = build_snapshot(config, issue_time, nwp, observations)
+    truncated = len(snapshot.lead_hours) < config.horizon_hours
     matrix = build_features(snapshot, config)
     base = baseline_predictions(matrix, config.label.precip_occurrence_threshold_mm)
 
@@ -175,7 +176,7 @@ def run_inference(
             snapshot.issue_time,
             last_updated=snapshot.issue_time,
             model_versions={"temp": BASELINE_VERSION, "pop": BASELINE_VERSION},
-            status="ok",
+            status="stale" if truncated else "ok",
         )
         write_forecast(doc, forecast_path)
         return doc
@@ -193,7 +194,13 @@ def run_inference(
     frame = base.copy()
     frame["pred_temp_c"] = tpreds
     frame["pred_pop"] = ppreds
-    status: Literal["ok", "degraded"] = "degraded" if (tdeg or pdeg) else "ok"
+    status: Literal["ok", "stale", "degraded"]
+    if tdeg or pdeg:
+        status = "degraded"
+    elif truncated:
+        status = "stale"
+    else:
+        status = "ok"
     doc = _assemble_forecast(
         config,
         frame,

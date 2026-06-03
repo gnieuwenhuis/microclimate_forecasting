@@ -289,3 +289,118 @@ def test_corrupt_champion_asset_is_degraded(tmp_path: Path) -> None:
     )
     assert doc.status == "degraded"
     assert doc.model_versions["temp"] == "baseline"
+
+
+def test_truncated_forecast_is_stale(tmp_path: Path) -> None:
+    """A snapshot shorter than horizon_hours (no champion) publishes status='stale'."""
+    import pandas as pd
+
+    from microclimate.connectors.base import NWPSource
+    from microclimate.contracts.forecast_frame import FORECAST_FRAME
+    from tests.fakes import PINNED
+
+    # min_horizon_hours=1 so 2 leads pass the floor check (< horizon 3 → stale, not raised)
+    config = make_config(horizon_hours=3, lag_hours=2, min_horizon_hours=1)
+    _config, _nwp, obs = _make_fakes()
+
+    class _Trunc(NWPSource):
+        @property
+        def is_live(self) -> bool:
+            return True
+
+        def fetch_forecast(self, issue_time, lat, lon, lead_hours):  # type: ignore[override]
+            rows: list[dict[str, object]] = []
+            for h in (1, 2):  # 2 < horizon 3 -> truncated
+                rows.append(
+                    {
+                        "issue_time": pd.Timestamp(issue_time),
+                        "lead_hour": h,
+                        "valid_time": pd.Timestamp(issue_time) + pd.Timedelta(hours=h),
+                        **PINNED,
+                    }
+                )
+            return FORECAST_FRAME.validate(pd.DataFrame(rows))
+
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    doc = run_inference(
+        config,
+        nwp=_Trunc(),
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+        registry_path=tmp_path / "absent.json",
+        work_dir=tmp_path / "wd",
+    )
+    assert doc.status == "stale"
+    assert len(doc.series) == 2
+
+
+def test_full_coverage_is_ok(tmp_path: Path) -> None:
+    """Full-horizon snapshot, no registry -> status='ok' (regression guard)."""
+    config, nwp, obs = _make_fakes()  # fake NWP returns full horizon_hours leads
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    doc = run_inference(
+        config,
+        nwp=nwp,
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+        registry_path=tmp_path / "absent.json",
+        work_dir=tmp_path / "wd",
+    )
+    assert doc.status == "ok"
+
+
+def test_truncated_and_champion_download_fails_is_degraded(tmp_path: Path) -> None:
+    """Truncated snapshot + expected champion download fails → degraded wins over stale."""
+    import pandas as pd
+
+    from microclimate.connectors.base import NWPSource, SourceUnavailable
+    from microclimate.contracts.forecast_frame import FORECAST_FRAME
+    from tests.fakes import PINNED
+
+    # min_horizon_hours=1 so 2 leads pass the floor; < horizon 3 → would be stale
+    config = make_config(horizon_hours=3, lag_hours=2, min_horizon_hours=1)
+    _config, _nwp, obs = _make_fakes()
+
+    class _Trunc(NWPSource):
+        @property
+        def is_live(self) -> bool:
+            return True
+
+        def fetch_forecast(self, issue_time, lat, lon, lead_hours):  # type: ignore[override]
+            rows: list[dict[str, object]] = []
+            for h in (1, 2):
+                rows.append(
+                    {
+                        "issue_time": pd.Timestamp(issue_time),
+                        "lead_hour": h,
+                        "valid_time": pd.Timestamp(issue_time) + pd.Timedelta(hours=h),
+                        **PINNED,
+                    }
+                )
+            return FORECAST_FRAME.validate(pd.DataFrame(rows))
+
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    entry = RegistryEntry(
+        version="test-temp-x",
+        release_asset_url="https://example/x.joblib",
+        promoted_at=datetime(2026, 6, 3, tzinfo=UTC),
+        holdout_metrics={},
+    )
+    reg = _registry_with(tmp_path, {manifest_key("test", "temp"): entry})
+
+    def _boom(_u: str) -> bytes:
+        raise SourceUnavailable("download failed")
+
+    doc = run_inference(
+        config,
+        nwp=_Trunc(),
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+        registry_path=reg,
+        work_dir=tmp_path / "wd",
+        fetch_bytes=_boom,
+    )
+    assert doc.status == "degraded"  # degraded wins over stale
