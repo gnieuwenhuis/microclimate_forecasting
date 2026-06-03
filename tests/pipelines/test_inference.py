@@ -92,6 +92,41 @@ def test_run_inference_publishes_baseline(tmp_path: Path) -> None:
     assert all(s.pop == 1.0 for s in doc.series)
 
 
+def test_last_updated_defaults_to_run_time_not_issue_time(tmp_path: Path) -> None:
+    """last_updated is the wall-clock publish time, distinct from the HRDPS issue_time."""
+    config, nwp, obs = _make_fakes()
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    before = datetime.now(UTC)
+    doc = run_inference(
+        config,
+        nwp=nwp,
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+    )
+    after = datetime.now(UTC)
+    assert doc.issue_time == it
+    assert doc.last_updated != it  # the original bug: last_updated was stamped with issue_time
+    assert before <= doc.last_updated <= after
+
+
+def test_last_updated_is_injectable(tmp_path: Path) -> None:
+    """An explicit last_updated is used verbatim (deterministic for tests/callers)."""
+    config, nwp, obs = _make_fakes()
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    stamp = datetime(2026, 6, 1, 9, 30, tzinfo=UTC)
+    doc = run_inference(
+        config,
+        nwp=nwp,
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+        last_updated=stamp,
+    )
+    assert doc.last_updated == stamp
+    assert doc.issue_time == it
+
+
 def test_run_inference_normalizes_naive_issue_time_to_utc(tmp_path: Path) -> None:
     config = make_config(horizon_hours=3, lag_hours=2)
     leads = [1, 2, 3]
