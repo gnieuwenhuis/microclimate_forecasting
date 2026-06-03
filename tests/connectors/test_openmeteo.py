@@ -1,0 +1,176 @@
+"""Hermetic tests for the Open-Meteo connector (no network)."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import cast
+
+import pandas as pd
+import pytest
+
+from microclimate.connectors.sources.openmeteo import OpenMeteoSource
+from microclimate.contracts.forecast_frame import FORECAST_FRAME
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _load(name: str) -> dict[str, object]:
+    return json.loads((_FIXTURES / name).read_text())  # type: ignore[no-any-return]
+
+
+def _const_fetcher(body: str) -> Callable[..., str]:
+    def _fetch(url: str, *, params: Mapping[str, object] | None = None) -> str:
+        return body
+
+    return _fetch
+
+
+def test_parse_historical_fixture_to_forecast_frame() -> None:
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    payload = _load("openmeteo_historical.json")
+    # Fixture starts 2024-06-01T00:00; pick t0 there so leads 1..3 map to 01:00/02:00/03:00.
+    t0 = datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
+    df = _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1, 2, 3])  # pyright: ignore[reportPrivateUsage]
+
+    FORECAST_FRAME.validate(df)
+    assert list(df["lead_hour"]) == [1, 2, 3]
+    assert (df["cloud_cover_fraction"] >= 0).all() and (df["cloud_cover_fraction"] <= 1).all()
+    for _, row in df.iterrows():
+        assert row["valid_time"] == pd.Timestamp(t0) + pd.Timedelta(hours=int(row["lead_hour"]))
+
+
+def test_parse_raises_when_lead_hour_absent() -> None:
+    from microclimate.connectors.base import ForecastUnavailable
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    payload = _load("openmeteo_historical.json")
+    far = datetime(2024, 6, 3, 23, 0, tzinfo=UTC)  # t0+1 falls outside the fixture window
+    with pytest.raises(ForecastUnavailable):
+        _parse_hourly_to_forecast_frame(payload, issue_time=far, lead_hours=[1])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_parse_raises_when_variable_is_null() -> None:
+    from microclimate.connectors.base import ForecastUnavailable
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    payload = _load("openmeteo_historical.json")
+    hourly = cast("dict[str, list[object]]", payload["hourly"])
+    hourly["temperature_2m"][1] = None
+    t0 = datetime(2024, 6, 1, 0, 0, tzinfo=UTC)
+    with pytest.raises(ForecastUnavailable):
+        _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_request_routing_and_shared_params() -> None:
+    from microclimate.connectors.sources.openmeteo import (
+        _build_request,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    live_url, live_params = _build_request(  # pyright: ignore[reportPrivateUsage]
+        datetime(2026, 6, 2, 6, 0, tzinfo=UTC), 49.70, -112.77, [1, 48], now=now
+    )
+    hist_url, hist_params = _build_request(  # pyright: ignore[reportPrivateUsage]
+        datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1, 48], now=now
+    )
+
+    assert live_url.startswith("https://api.open-meteo.com/")
+    assert hist_url.startswith("https://historical-forecast-api.open-meteo.com/")
+    shared = (
+        "latitude",
+        "longitude",
+        "models",
+        "cell_selection",
+        "wind_speed_unit",
+        "timezone",
+        "hourly",
+    )
+    for k in shared:
+        assert live_params[k] == hist_params[k], k
+    assert live_params["cell_selection"] == "land"
+    assert live_params["models"] == "gem_hrdps_continental"
+    assert hist_params["start_date"] == "2024-06-01" and hist_params["end_date"] == "2024-06-03"
+    assert "start_date" not in live_params
+    # Live route must include forecast_days covering max lead; historical route must not.
+    import math
+
+    max_lead = 48
+    assert "forecast_days" in live_params
+    assert int(live_params["forecast_days"]) >= math.ceil(max_lead / 24)
+    assert "forecast_days" not in hist_params
+
+
+def test_source_fetch_forecast_hermetic() -> None:
+    payload = _load("openmeteo_historical.json")
+
+    def fake_fetcher(url: str, *, params: object) -> str:  # matches http_get(url, params=...)
+        return json.dumps(payload)
+
+    source = OpenMeteoSource(fetcher=fake_fetcher, now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC))
+    df = source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1, 2, 3])
+    FORECAST_FRAME.validate(df)
+    assert source.is_live is True
+    assert list(df["lead_hour"]) == [1, 2, 3]
+
+
+def test_source_raises_source_unavailable_on_non_json() -> None:
+    from microclimate.connectors.base import SourceUnavailable
+
+    source = OpenMeteoSource(
+        fetcher=_const_fetcher("not json"),
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SourceUnavailable):
+        source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
+
+
+def test_source_raises_source_unavailable_on_non_object_body() -> None:
+    from microclimate.connectors.base import SourceUnavailable
+
+    source = OpenMeteoSource(
+        fetcher=_const_fetcher("[1, 2, 3]"),
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SourceUnavailable):
+        source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
+
+
+def test_source_raises_source_unavailable_on_api_error_payload() -> None:
+    from microclimate.connectors.base import SourceUnavailable
+
+    body = json.dumps({"error": True, "reason": "Invalid coordinate"})
+    source = OpenMeteoSource(
+        fetcher=_const_fetcher(body),
+        now=datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+    )
+    with pytest.raises(SourceUnavailable):
+        source.fetch_forecast(datetime(2024, 6, 1, 0, 0, tzinfo=UTC), 49.70, -112.77, [1])
+
+
+def test_request_spec_parity_live_vs_historical() -> None:
+    """Spatial/variable parity: shared keys identical across routes (ADR-0019 §1)."""
+    from microclimate.connectors.sources.openmeteo import (
+        _build_request,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    _, live = _build_request(  # pyright: ignore[reportPrivateUsage]
+        datetime(2026, 6, 2, 6, 0, tzinfo=UTC), 49.70, -112.77, list(range(1, 49)), now=now
+    )
+    _, hist = _build_request(  # pyright: ignore[reportPrivateUsage]
+        datetime(2024, 1, 5, 0, 0, tzinfo=UTC), 49.70, -112.77, list(range(1, 49)), now=now
+    )
+    shared_keys = set(live) & set(hist)
+    for k in shared_keys:
+        assert live[k] == hist[k], f"parity break on {k!r}: {live[k]!r} != {hist[k]!r}"
+    # Lead-time provenance is NOT pinned (accepted §1b skew): the route URLs differ by design.

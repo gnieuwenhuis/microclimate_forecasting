@@ -102,13 +102,16 @@ ADR-0019; git history preserves the native path.)
 
 ### 6. Attribution — store-level + existing surfaces, CI-checked
 
-- Add `ATTRIBUTION.md` (or `LICENSE`) at the `training-data` branch root: *"Contains data from
-  Open-Meteo.com under CC-BY-4.0 (modified: normalized, de-accumulated, resampled to the target
-  cell). Underlying model: HRDPS © Environment and Climate Change Canada (ECCC open-data
-  licence)."*
+- The attribution notice text lives at `scripts/training_store_attribution.txt` in the main
+  branch: *"Contains data from Open-Meteo.com under CC-BY-4.0 (modified: normalized,
+  de-accumulated, resampled to the target cell). Underlying model: HRDPS © Environment and
+  Climate Change Canada (ECCC open-data licence)."*
+- **CI check** asserts `scripts/training_store_attribution.txt` exists in the repo — it does
+  **not** place or verify the file on the `training-data` branch. **Copying the notice onto
+  the published `training-data` branch root is the responsibility of the (deferred) store-publish
+  slice.**
 - Update `DATA_LICENSES.md` (add Open-Meteo CC-BY-4.0; drop CaSPAr/Mai as required source), the
   forecast JSON `attribution` field, and the dashboard footer → **Open-Meteo + ECCC**.
-- **CI check** asserts the store branch carries the attribution file (guardrails-over-discipline).
 
 ### 7. Request-spec parity fitness function — `tests/`
 

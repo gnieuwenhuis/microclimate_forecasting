@@ -1,14 +1,8 @@
 name: inference
 # Hourly at :23 (off-peak, see the schedule note below): build each deployment's HRDPS
-# snapshot, publish the baseline forecast (discarded for now — gh-pages publish is a follow-on),
-# and write the snapshot to the PUBLIC training-data branch (ADR-0017, ADR-0018). Runbook:
-# trigger via "Run workflow" (workflow_dispatch) or wait for the next scheduled run; data lands
-# on the `training-data` branch under
-# snapshots/deployment_id=<id>/ym=YYYYMM/data.parquet (one coalesced file per deployment-month;
-# the branch root is the `store` checkout, so committed paths drop the local `store/` prefix).
-# The branch is force-pushed as a single state commit each run — history stays bounded (ADR-0018).
-# First run bootstraps the orphan branch. Needs Actions write permission — declared below via
-# `permissions: contents: write`.
+# snapshot and publish the baseline forecast JSON. Stateless — no snapshot logging (ADR-0019);
+# training data is collected via a separate retrain-time backfill. Runbook: trigger via
+# "Run workflow" (workflow_dispatch) or wait for the next scheduled run.
 on:
   schedule:
     # Hourly at :23 (NOT ":00"). GitHub queues/sheds scheduled events under load, and the top of
@@ -16,19 +10,9 @@ on:
     # started 11-58 min late. An off-peak minute is dropped far less often. NOTE: GitHub's hosted
     # cron is best-effort and can blackout for hours regardless of minute; if reliable cadence
     # becomes critical, drive this via an external scheduler hitting the workflow_dispatch API.
-    # Capturing each HRDPS 6-hourly cycle (00/06/12/18Z) only needs one success per ~6h window;
-    # idempotent logging makes any redundant runs cheap no-ops.
+    # Capturing each HRDPS 6-hourly cycle (00/06/12/18Z) only needs one success per ~6h window.
     - cron: "23 * * * *"
   workflow_dispatch:
-
-# Serialize runs so two of them never push the training-data branch at once.
-concurrency:
-  group: inference
-  cancel-in-progress: false
-
-# Allow the built-in GITHUB_TOKEN to push the training-data branch.
-permissions:
-  contents: write
 
 jobs:
   run:
@@ -36,53 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install eccodes (cfgrib GRIB2 decode for HRDPS Datamart)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeccodes0
-
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
-      - name: Verify cfgrib can load eccodes
-        run: uv run python -c "import cfgrib; print('cfgrib', cfgrib.__version__)"
 
-      - name: Check out (or bootstrap) the public training-data store
-        env:
-          STORE_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-        run: |
-          set -euo pipefail
-          if git clone --depth 1 --branch training-data "$STORE_URL" store 2>/dev/null; then
-            echo "Cloned existing training-data branch."
-          else
-            echo "training-data branch absent; bootstrapping an empty orphan branch."
-            rm -rf store && mkdir store
-            git -C store init -q
-            git -C store remote add origin "$STORE_URL"
-            git -C store checkout -q --orphan training-data
-          fi
-
-      - name: Run inference for each deployment (append snapshots to the store)
+      - name: Run inference for each deployment
         run: |
           set -euo pipefail
           for f in config/deployments/*.yml; do
             id="$(basename "$f" .yml)"
             echo "::group::inference $id"
-            TRAINING_STORE_ROOT=store uv run python -m microclimate.pipelines.inference --deployment "$id"
+            uv run python -m microclimate.pipelines.inference --deployment "$id"
             echo "::endgroup::"
           done
-
-      - name: Force-push the store state to training-data
-        run: |
-          set -euo pipefail
-          cd store
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No store changes; nothing to push."
-          else
-            # The training-data branch is derived state (provenance is in the rows), so replace
-            # its history with a single commit of the current store — keeps git size bounded
-            # despite read-modify-write rewrites (ADR-0018).
-            git checkout -q --orphan _state
-            git add -A
-            git commit -q -m "data: store snapshot $(date -u +%FT%TZ)"
-            git push -q --force origin _state:training-data
-          fi

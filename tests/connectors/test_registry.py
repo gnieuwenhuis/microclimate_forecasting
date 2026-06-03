@@ -79,7 +79,7 @@ def _config(target_key: str, sources: list[str]) -> DeploymentConfig:
         feature_groups=FeatureGroupSwitches(nwp=True, observations=True),
         label=LabelConfig(precip_occurrence_threshold_mm=0.2),
         training=TrainingConfig(
-            seed=SeedConfig(source="caspar", start="2017-05-22"), holdout_months=12
+            seed=SeedConfig(source="openmeteo", start="2024-01-01"), holdout_months=12
         ),
         output=OutputConfig(forecast_json="forecasts/t.json"),
     )

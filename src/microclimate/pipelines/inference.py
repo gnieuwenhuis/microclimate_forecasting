@@ -1,14 +1,13 @@
-"""Hourly inference + logger pipeline (L6, ADR-0003/0007/0009/0016).
+"""Stateless inference pipeline (ADR-0019): build snapshot → baseline forecast → write JSON.
 
-Builds the snapshot, produces the raw-HRDPS baseline forecast, writes the ForecastDocument
-JSON, and appends the snapshot to the training store. Registry/champion-loading and the
-private-repo/gh-pages git sync are out of scope (separate specs); this writes to local paths.
+No snapshot logging; training data is collected via a separate retrain-time backfill.
+Registry/champion-loading and the private-repo/gh-pages git sync are out of scope (separate
+specs); this writes to local paths.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,22 +24,25 @@ from microclimate.features.feature_builder import build_features
 from microclimate.features.snapshot_builder import build_snapshot
 from microclimate.models.baseline import BASELINE_VERSION, baseline_predictions
 from microclimate.publication.forecast_writer import write_forecast
-from microclimate.training_store import TrainingStore
 
-_ATTRIBUTION = ["Data Source: Environment and Climate Change Canada (ECCC)"]
+_ATTRIBUTION = [
+    "Weather data by Open-Meteo.com (CC-BY 4.0)",
+    "Data Source: Environment and Climate Change Canada (ECCC)",
+]
 
-_HRDPS_PUBLISH_LAG = timedelta(hours=4)  # Datamart publishes each run ~3-4 h after init
+_HRDPS_PUBLISH_LAG = timedelta(
+    hours=4
+)  # heuristic: Open-Meteo makes a run available ~3-4 h after init
 
 
 def _latest_hrdps_issue_time(now: datetime) -> datetime:
-    """Most recent HRDPS run init time (00/06/12/18 UTC) likely published by ``now``.
+    """Most recent HRDPS run init time (00/06/12/18 UTC) likely available via Open-Meteo by ``now``.
 
-    HRDPS runs four times daily; Datamart publishes each run ~3-4 h after its init time.
-    Subtracting the publish lag then flooring to the 6-hourly cycle yields a run that should
-    be available. If a chosen run is still unpublished, ``build_snapshot`` propagates the
-    connector error (``SourceUnavailable`` on a 404, or ``ForecastUnavailable``) and the next
-    hourly Action run retries; the training store dedupes a re-logged ``issue_time`` (ADR-0015),
-    so hourly re-runs are idempotent.
+    HRDPS runs four times daily; Open-Meteo typically makes each run available ~3-4 h after its
+    init time. Subtracting the publish lag then flooring to the 6-hourly cycle yields a run that
+    should be available. If the chosen run is not yet available, ``build_snapshot`` propagates the
+    connector error (``ForecastUnavailable`` or ``SourceUnavailable``) and the next hourly Action
+    run retries — fail-safe.
     """
     t = (
         now.astimezone(UTC) if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -88,22 +90,15 @@ def run_inference(
     *,
     nwp: NWPSource,
     observations: Mapping[str, ObservationSource],
-    store: TrainingStore,
     forecast_path: Path,
     issue_time: datetime,
-) -> ForecastDocument | None:
-    """Build a snapshot → baseline forecast → write JSON → log the snapshot. Returns the doc,
-    or None if this issue_time is already in the store (idempotent skip — no fetch/publish)."""
-    if store.has_snapshot(config.deployment_id, issue_time):
-        return None
+) -> ForecastDocument:
+    """Build a snapshot -> baseline forecast -> write JSON. Stateless (ADR-0019)."""
     snapshot = build_snapshot(config, issue_time, nwp, observations)
     matrix = build_features(snapshot, config)
     preds = baseline_predictions(matrix, config.label.precip_occurrence_threshold_mm)
-    # Use the snapshot's normalized-UTC issue_time (build_snapshot coerces naive/non-UTC inputs)
-    # so the published document's issue_time matches the UTC valid_times and the logged snapshot.
     doc = _assemble_forecast(config, preds, snapshot.issue_time, last_updated=snapshot.issue_time)
     write_forecast(doc, forecast_path)
-    store.append_snapshot(snapshot)
     return doc
 
 
@@ -116,19 +111,15 @@ def main() -> None:
     nwp = cast(NWPSource, get_source(config.nwp.live_connector))
     station_keys = {config.target.connector_key, *(n.connector_key for n in config.neighbors)}
     observations = {k: cast(ObservationSource, get_source(k)) for k in station_keys}
-    store = TrainingStore(Path(os.environ.get("TRAINING_STORE_ROOT", "training-store")))
     issue_time = _latest_hrdps_issue_time(datetime.now(UTC))
 
-    doc = run_inference(
+    run_inference(
         config,
         nwp=nwp,
         observations=observations,
-        store=store,
         forecast_path=Path(config.output.forecast_json),
         issue_time=issue_time,
     )
-    if doc is None:
-        print(f"Already collected snapshot for issue_time={issue_time.isoformat()}; skipped.")
 
 
 if __name__ == "__main__":

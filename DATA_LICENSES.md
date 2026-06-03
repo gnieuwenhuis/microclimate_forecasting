@@ -8,10 +8,25 @@ model binaries) are published publicly, while the **raw data store is kept priva
 Every public, data-bearing artifact (the forecast JSON's `attribution` field, the dashboard
 footer) must carry the acknowledgments below.
 
+## Open-Meteo — HRDPS forecasts via open API (CC-BY 4.0)
+
+- **Source:** Open-Meteo.com public forecast API (`api.open-meteo.com`), serving HRDPS
+  (and other NWP models) under the Creative Commons Attribution 4.0 International licence.
+- **Licence:** CC-BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+- **Required attribution (verbatim string used in all public artifacts):**
+  > Weather data by Open-Meteo.com (CC-BY 4.0)
+- **Modification note:** data is normalized, unit-converted, and resampled to a single
+  target grid cell before storage and use.
+- **Redistribution:** permitted with attribution. The `training-data` branch (a
+  redistribution of CC-BY-4.0 data) carries its own attribution notice
+  (`scripts/training_store_attribution.txt`).
+- Reference: https://open-meteo.com / https://github.com/open-meteo/open-meteo
+
 ## Environment and Climate Change Canada (ECCC / MSC) — HRDPS, station observations
 
-- **Source:** HRDPS via MSC GeoMet / Datamart (inference) and via CaSPAr (historical seed);
-  Environment Canada station observations (e.g. Lethbridge Airport, Climate ID 3033875).
+- **Source:** ECCC is the originating agency for the HRDPS model (now sourced via
+  Open-Meteo, CC-BY-4.0 — see above) and for station observations (e.g. Lethbridge Airport,
+  Climate ID 3033875) used as training labels and inference features.
 - **Licence:** *Environment and Climate Change Canada Data Servers End-use Licence*
   (v2.1, September 2022) — worldwide, royalty-free, perpetual, commercial use permitted.
   Explicitly grants the right to copy, modify, publish, and distribute the data for any
@@ -43,10 +58,14 @@ footer) must carry the acknowledgments below.
 
 ## CaSPAr — Canadian Surface Prediction Archive (University of Waterloo)
 
+> **Not used — superseded by ADR-0019.** Historical HRDPS data is now sourced via the
+> Open-Meteo API (see above); CaSPAr is no longer used as a data source and its citation
+> is dropped from all public artifacts. This section is retained for the record.
+
 - **Source:** historical HRDPS seed (2017-05-22 onward). CaSPAr is a convenience archive of
   ECCC numerical forecasts; the underlying data is ECCC-licensed (above).
 - **Terms:** free registration required to access; citation requested.
-- **Required citation:**
+- **Required citation (no longer used):**
   > Mai et al. (2020). The Canadian Surface Prediction Archive (CaSPAr): A Platform to
   > Enhance Environmental Modeling in Canada and Globally. *Bulletin of the American
   > Meteorological Society*, 101(3), E341–E356.

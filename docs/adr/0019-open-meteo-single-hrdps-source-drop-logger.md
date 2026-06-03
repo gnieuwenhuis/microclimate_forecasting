@@ -113,11 +113,14 @@ is about *observation* depth (ECCC, deep), which is untouched; only the seed *so
   qualifies. If a deployment ever monetizes, it needs Open-Meteo's paid plan or self-hosting.
 - The data is **CC-BY-4.0**, which permits public redistribution **with attribution**. Therefore
   the **public `training-data` branch must carry its own attribution notice** (a redistribution of
-  CC-BY-4.0 data), enforced by a CI check — in addition to the forecast JSON `attribution` field
-  and dashboard footer. Attribution credits **Open-Meteo (CC-BY-4.0, changes indicated)** and
-  **ECCC** (HRDPS + station obs). The **CaSPAr / Mai et al. 2020 citation is dropped.** This
-  finishes superseding ADR-0009's "raw store must be private" stance (begun by ADR-0017): the raw
-  data is now CC-BY-4.0/ECCC, redistributable with attribution.
+  CC-BY-4.0 data) — in addition to the forecast JSON `attribution` field and dashboard footer.
+  Attribution credits **Open-Meteo (CC-BY-4.0, changes indicated)** and **ECCC** (HRDPS + station
+  obs). The **CaSPAr / Mai et al. 2020 citation is dropped.** This finishes superseding ADR-0009's
+  "raw store must be private" stance (begun by ADR-0017): the raw data is now CC-BY-4.0/ECCC,
+  redistributable with attribution. The notice text lives at
+  `scripts/training_store_attribution.txt` (CI checks this file exists in-repo); **copying it onto
+  the `training-data` branch root is the responsibility of the (deferred) store-publish slice** —
+  that slice is not yet implemented.
 
 ## Consequences
 
