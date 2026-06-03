@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -14,9 +14,8 @@ import pandas as pd
 from microclimate.config.loader import load_deployment
 from microclimate.config.schema import DeploymentConfig
 from microclimate.connectors.base import NWPSource, ObservationSource
-from microclimate.connectors.http import http_get_bytes
 from microclimate.connectors.registry import get_source, validate_config_sources
-from microclimate.contracts.registry import RegistryEntry, RegistryManifest, Task, manifest_key
+from microclimate.contracts.registry import RegistryEntry, RegistryManifest, Task
 from microclimate.evaluation.metrics import nwp_pop_baseline
 from microclimate.evaluation.publish_gate import GateResult, evaluate_challenger
 from microclimate.models.pop_model import PrecipOccurrenceClassifier
@@ -24,6 +23,7 @@ from microclimate.models.temp_model import TemperatureRegressor
 from microclimate.pipelines.backfill import backfill_store, hrdps_issue_times
 from microclimate.pipelines.training_data import assemble_from_store, temporal_split
 from microclimate.publication import champion_publisher as cp
+from microclimate.publication.champion_loader import load_champion
 from microclimate.publication.registry_store import promote, read_registry, write_registry
 from microclimate.training_store.store import TrainingStore
 
@@ -34,33 +34,6 @@ class _Saveable(Protocol):
     """Duck-type contract for any fitted model that can persist itself."""
 
     def save(self, path: Path) -> None: ...
-
-
-class _Predictor(Protocol):
-    """Duck-type contract for any fitted model that exposes predict."""
-
-    def predict(self, rows: pd.DataFrame) -> pd.Series[float]: ...
-
-
-def load_champion(
-    config: DeploymentConfig,
-    registry_path: Path,
-    task: Task,
-    work_dir: Path,
-    *,
-    fetch_bytes: Callable[[str], bytes] = lambda url: http_get_bytes(url),
-) -> _Predictor | None:
-    """Load the current champion model for a task, or None when it's the baseline."""
-    manifest = read_registry(registry_path)
-    entry = manifest.entries.get(manifest_key(config.deployment_id, task))
-    if entry is None or entry.version == "baseline":
-        return None
-    work_dir.mkdir(parents=True, exist_ok=True)
-    local = work_dir / cp.asset_filename(entry.version)
-    local.write_bytes(fetch_bytes(entry.release_asset_url))
-    if task == "temp":
-        return TemperatureRegressor.load(local)
-    return PrecipOccurrenceClassifier.load(local)
 
 
 def _do_promote(
@@ -146,7 +119,7 @@ def run_training(
     res_t = evaluate_challenger(
         "temp",
         temp,
-        load_champion(config, registry_path, "temp", champ_dir),
+        load_champion(config.deployment_id, registry_path, "temp", champ_dir),
         test["nwp_temp_c"],
         test,
     )
@@ -162,7 +135,11 @@ def run_training(
     pop.calibrate(calib)
     pop_baseline = nwp_pop_baseline(test, config.label.precip_occurrence_threshold_mm)
     res_p = evaluate_challenger(
-        "pop", pop, load_champion(config, registry_path, "pop", champ_dir), pop_baseline, test
+        "pop",
+        pop,
+        load_champion(config.deployment_id, registry_path, "pop", champ_dir),
+        pop_baseline,
+        test,
     )
     results["pop"] = res_p
     print(f"pop gate: {res_p.reason}")

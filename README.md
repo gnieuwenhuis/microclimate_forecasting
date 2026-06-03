@@ -46,12 +46,13 @@ raw-HRDPS baseline + PoP reliability), a thin local **model-dev notebook**
 partitioned-Parquet store (raw `FeatureSnapshot` blobs + a separate labels table, ADR-0015),
 the **raw-HRDPS baseline forecaster** (`models.baseline`) — temperature passthrough +
 threshold PoP, the initial published champion (ADR-0016), `publication.write_forecast` —
-atomic forecast-JSON writer, `pipelines.inference.run_inference` — **stateless
-publish-only**: builds a snapshot, produces the baseline forecast, and writes the
-`ForecastDocument` JSON (the inference logger was removed; the training store is populated
-at retrain time via the seed backfill, not during inference), and the **hourly inference
-GitHub Action** (`.github/workflows/inference.yml`) that runs it per deployment
-(ADR-0017).
+atomic forecast-JSON writer, `pipelines.inference.run_inference` — **stateless**: builds a snapshot, loads the
+promoted champion per task from `registry.json`, predicts, falls back to the raw-HRDPS
+baseline with `status="degraded"` when a champion is unusable, and writes the
+`ForecastDocument` JSON (the training store is populated at retrain time via the seed
+backfill, not during inference), and the **hourly inference GitHub Action**
+(`.github/workflows/inference.yml`) that runs it per deployment and publishes the forecast
+JSON to gh-pages (ADR-0017).
 
 **Training pipeline now implemented** (`pipelines/training.py`): monthly retrain runs
 seed backfill → train → champion/challenger publish gate (`evaluation.publish_gate`,
@@ -60,10 +61,15 @@ ADR-0006) → on promotion, publishes the champion model as a GitHub Release ass
 `training-data` branch (ADR-0017/0018). `evaluation.publish_gate` and
 `publication.registry_store` are no longer stubs.
 
-**Remaining gap:** inference still publishes the **baseline** (`{"temp": "baseline", "pop":
-"baseline"}`); swapping the inference pipeline to load the registry/champion is the next
-slice. The **gh-pages forecast-JSON publish** (the public live-service surface) is also not
-yet wired. `acis` is retained but unused (ADR-0010).
+**Inference now serves the promoted champion** (`pipelines/inference.py`): `run_inference`
+reads `registry.json` and loads the per-task champion (temp/pop) via
+`publication.champion_loader.load_champion`, predicts with it, and falls back to the
+raw-HRDPS baseline — setting `status="degraded"` only when an *expected* champion is
+unusable (download/load failure or a stale `feature_schema_version` that the model's
+`predict` refuses). Per-task `model_versions` in the `ForecastDocument` reflect the actual
+producer. The **hourly inference GitHub Action** also **publishes the forecast JSON to
+gh-pages** (the public live-service surface). The full **train → publish (Release +
+`registry.json`) → serve** loop is now closed. `acis` is retained but unused (ADR-0010).
 
 ## Develop
 
