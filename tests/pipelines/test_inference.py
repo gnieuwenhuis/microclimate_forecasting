@@ -127,6 +127,23 @@ def test_last_updated_is_injectable(tmp_path: Path) -> None:
     assert doc.issue_time == it
 
 
+def test_naive_last_updated_normalized_to_utc(tmp_path: Path) -> None:
+    """A tz-naive injected last_updated is normalized to UTC (matches issue_time convention)."""
+    config, nwp, obs = _make_fakes()
+    it = datetime(2026, 6, 1, 0, tzinfo=UTC)
+    naive = datetime(2026, 6, 1, 9, 30)  # no tzinfo
+    doc = run_inference(
+        config,
+        nwp=nwp,
+        observations=obs,
+        forecast_path=tmp_path / "f.json",
+        issue_time=it,
+        last_updated=naive,
+    )
+    assert doc.last_updated == datetime(2026, 6, 1, 9, 30, tzinfo=UTC)
+    assert doc.last_updated.tzinfo is not None
+
+
 def test_run_inference_normalizes_naive_issue_time_to_utc(tmp_path: Path) -> None:
     config = make_config(horizon_hours=3, lag_hours=2)
     leads = [1, 2, 3]

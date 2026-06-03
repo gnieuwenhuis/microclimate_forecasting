@@ -173,6 +173,8 @@ def run_inference(
     ``ok``. So even a baseline-only run is ``stale`` when truncated, and ``ok`` otherwise.
     """
     published_at = last_updated if last_updated is not None else datetime.now(UTC)
+    if published_at.tzinfo is None:  # mirror the naive→UTC convention used for issue_time
+        published_at = published_at.replace(tzinfo=UTC)
     snapshot = build_snapshot(config, issue_time, nwp, observations)
     truncated = len(snapshot.lead_hours) < config.horizon_hours
     matrix = build_features(snapshot, config)
