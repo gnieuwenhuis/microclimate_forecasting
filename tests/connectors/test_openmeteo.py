@@ -174,3 +174,73 @@ def test_request_spec_parity_live_vs_historical() -> None:
     for k in shared_keys:
         assert live[k] == hist[k], f"parity break on {k!r}: {live[k]!r} != {hist[k]!r}"
     # Lead-time provenance is NOT pinned (accepted §1b skew): the route URLs differ by design.
+
+
+def _payload(n_present: int, n_total: int) -> dict[str, object]:
+    """Hourly payload: n_total slots; vars non-null for the first n_present leads, null after."""
+    from datetime import UTC, datetime, timedelta
+
+    t0 = datetime(2024, 6, 1, 0, tzinfo=UTC)
+    times: list[str] = [
+        (t0 + timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M") for i in range(n_total + 1)
+    ]
+    om_vars = [
+        "temperature_2m",
+        "dew_point_2m",
+        "surface_pressure",
+        "precipitation",
+        "cloud_cover",
+        "shortwave_radiation",
+        "wind_speed_10m",
+        "wind_direction_10m",
+    ]
+    vals = {"surface_pressure": 900.0, "wind_direction_10m": 180.0, "cloud_cover": 50.0}
+    hourly: dict[str, object] = {"time": times}
+    for v in om_vars:
+        base: float = vals.get(v, 1.0)
+        # index 0 = t0 (lead 0, unused); indices 1..n_present present, rest null
+        hourly[v] = [base] + [base if i <= n_present else None for i in range(1, n_total + 1)]
+    return {"hourly": hourly}
+
+
+def test_parse_truncates_at_first_null_returns_prefix() -> None:
+    from datetime import UTC, datetime
+
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    t0 = datetime(2024, 6, 1, 0, tzinfo=UTC)
+    payload = _payload(n_present=3, n_total=6)
+    df = _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1, 2, 3, 4, 5, 6])  # pyright: ignore[reportPrivateUsage]
+    assert list(df["lead_hour"]) == [1, 2, 3]
+    FORECAST_FRAME.validate(df)
+
+
+def test_parse_returns_full_when_complete() -> None:
+    from datetime import UTC, datetime
+
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    t0 = datetime(2024, 6, 1, 0, tzinfo=UTC)
+    payload = _payload(n_present=6, n_total=6)
+    df = _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1, 2, 3, 4, 5, 6])  # pyright: ignore[reportPrivateUsage]
+    assert list(df["lead_hour"]) == [1, 2, 3, 4, 5, 6]
+
+
+def test_parse_raises_when_first_lead_null() -> None:
+    from datetime import UTC, datetime
+
+    import pytest
+
+    from microclimate.connectors.base import ForecastUnavailable
+    from microclimate.connectors.sources.openmeteo import (
+        _parse_hourly_to_forecast_frame,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    t0 = datetime(2024, 6, 1, 0, tzinfo=UTC)
+    payload = _payload(n_present=0, n_total=6)
+    with pytest.raises(ForecastUnavailable):
+        _parse_hourly_to_forecast_frame(payload, issue_time=t0, lead_hours=[1, 2, 3])  # pyright: ignore[reportPrivateUsage]

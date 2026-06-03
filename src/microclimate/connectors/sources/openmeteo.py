@@ -84,7 +84,10 @@ def _parse_hourly_to_forecast_frame(
     """Map an Open-Meteo `hourly` payload to a FORECAST_FRAME-valid DataFrame.
 
     Selects, for each requested lead h, the value at valid_time = issue_time + h.
-    Raises ForecastUnavailable if any requested valid_time is absent or null.
+    Returns the contiguous non-null lead prefix (leads 1..k where k is the last
+    lead before the first missing time slot or null variable value).
+    Raises ForecastUnavailable only if no lead is available (k == 0), i.e. lead 1
+    is missing or null.
     """
     if issue_time.tzinfo is not None:
         issue_utc = issue_time.astimezone(UTC)
@@ -106,28 +109,33 @@ def _parse_hourly_to_forecast_frame(
         key = valid.strftime(_OM_TIME_FMT)
         idx = index_by_time.get(key)
         if idx is None:
-            raise ForecastUnavailable(
-                f"Open-Meteo series has no entry for valid_time {key} (lead_hour={h})."
-            )
+            break  # series doesn't reach this lead — truncate to the prefix so far
         row: dict[str, object] = {
             "issue_time": pd.Timestamp(issue_utc),
             "lead_hour": int(h),
             "valid_time": pd.Timestamp(valid),
         }
+        incomplete = False
         for canon in PHYSICAL_VARS:
             raw = hourly[_OPENMETEO_VAR_MAP[canon]][idx]  # type: ignore[index]
             if raw is None:
-                raise ForecastUnavailable(
-                    f"Open-Meteo {canon!r} is null at valid_time {key} (lead_hour={h})."
-                )
-            value = float(raw)  # type: ignore[arg-type]  # raw is object from dict[str, object]
+                incomplete = True
+                break  # null var (beyond the model's reach) — stop before adding this lead
+            value = float(raw)  # type: ignore[arg-type]
             if canon == "cloud_cover_fraction":
                 value = max(0.0, min(1.0, value / _PCT_TO_FRACTION))
             elif canon in ("precip_mm", "solar_radiation_wm2"):
                 value = max(0.0, value)
             row[canon] = value
+        if incomplete:
+            break
         rows.append(row)
 
+    if not rows:
+        raise ForecastUnavailable(
+            f"Open-Meteo returned no usable leads for issue_time {issue_utc.isoformat()} "
+            "(lead 1 missing or null)."
+        )
     df = pd.DataFrame(rows)
     return FORECAST_FRAME.validate(df)
 

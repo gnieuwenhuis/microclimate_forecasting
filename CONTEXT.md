@@ -204,9 +204,19 @@ weather agency**. It corrects an existing official forecast for local bias.
   and (later) the training pipeline; caches assembled rows to local Parquet.
 - **Model-dev notebook** — the thin, local-only `notebooks/model_dev.py` for training and
   exploring models. Holds no logic; calls the shared assembly, model, and metric functions.
+- **`min_horizon_hours`** — the minimum number of contiguous available HRDPS leads for a
+  run to still publish (default 12). The live HRDPS series goes null past the freshest
+  run's reach; the system truncates the forecast to the available prefix `1…k` and
+  publishes a **shorter** forecast, but if `k < min_horizon_hours` the run is treated as
+  unavailable and retries (ADR-0019).
 - **Forecast JSON** — the single published, schema-versioned output document a deployment
   produces. The only thing thin clients read. Carries an **`attribution`** field (data-source
   acknowledgments) and never embeds raw observations — only derived predictions (ADR-0009).
+  `status` ∈ `ok` | `stale` | `degraded`: **`ok`** — full-horizon forecast (neither truncated nor
+  degraded; champion *or* baseline); **`stale`** — forecast horizon was truncated below
+  `horizon_hours` (fewer than the target leads were available from HRDPS); **`degraded`** — an
+  expected champion couldn't be served so the baseline was used. Precedence: `degraded` > `stale`
+  > `ok` (per-run, not per-task; `model_versions` records the actual producer per task).
 - **Thin client** — a consumer that *only* reads the forecast JSON (never touches HRDPS,
   station feeds, or models). The dashboard and the future Android app are thin clients.
 - **Dashboard** — the v1 thin client: static files served from GitHub Pages, reading the

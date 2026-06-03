@@ -45,7 +45,14 @@ class NWPSource(Source):
     @abstractmethod
     def fetch_forecast(
         self, issue_time: datetime, lat: float, lon: float, lead_hours: Sequence[int]
-    ) -> pd.DataFrame: ...
+    ) -> pd.DataFrame:
+        """Return a FORECAST_FRAME for the requested leads.
+
+        May return the available **contiguous lead prefix** (≤ ``lead_hours``) when later leads
+        are unavailable — e.g. beyond the model's reach; callers treat fewer leads as a truncated
+        horizon. Raise ``ForecastUnavailable`` only when no lead is available.
+        """
+        ...
 
 
 class ObservationSource(Source):

@@ -142,6 +142,7 @@ def make_config(
     observations: bool = True,
     neighbors: list[StationRef] | None = None,
     connector_key: str = "fake",
+    min_horizon_hours: int | None = None,
 ) -> DeploymentConfig:
     """Minimal valid DeploymentConfig: 1 target + (default) 1 neighbor, both `connector_key`."""
     if neighbors is None:
@@ -168,6 +169,9 @@ def make_config(
             sampling="nearest_grid_cell",
         ),
         horizon_hours=horizon_hours,
+        min_horizon_hours=(
+            min_horizon_hours if min_horizon_hours is not None else min(12, horizon_hours)
+        ),
         lag_hours=lag_hours,
         feature_groups=FeatureGroupSwitches(nwp=nwp, observations=observations),
         label=LabelConfig(precip_occurrence_threshold_mm=0.2),
