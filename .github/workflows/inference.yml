@@ -23,8 +23,8 @@ jobs:
       group: gh-pages-publish      # gh-pages is shared (also written by training.yml)
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync
 
       - name: Check out (or bootstrap) gh-pages
