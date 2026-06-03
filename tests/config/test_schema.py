@@ -54,6 +54,27 @@ def test_unknown_key_rejected() -> None:
         DeploymentConfig.model_validate(raw)
 
 
+def test_min_horizon_defaults_to_12_and_loads_from_lethbridge() -> None:
+    from microclimate.config.loader import load_deployment
+
+    config = load_deployment("lethbridge")
+    assert config.min_horizon_hours == 12
+    assert config.min_horizon_hours <= config.horizon_hours
+
+
+def test_min_horizon_greater_than_horizon_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from microclimate.config.loader import load_deployment
+    from microclimate.config.schema import DeploymentConfig
+
+    base = load_deployment("lethbridge").model_dump()
+    base["min_horizon_hours"] = base["horizon_hours"] + 1
+    with pytest.raises(ValidationError):
+        DeploymentConfig.model_validate(base)
+
+
 def test_lethbridge_uses_openmeteo_for_both_feeds() -> None:
     import microclimate.connectors  # noqa: F401  # populate registry  # type: ignore[import]
     from microclimate.config.loader import load_deployment

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StationRef(BaseModel):
@@ -68,8 +68,20 @@ class DeploymentConfig(BaseModel):
     enabled_sources: list[str]
     nwp: NwpConfig
     horizon_hours: int = Field(default=48, ge=1, le=48)  # HRDPS lead-time ceiling (ADR-0007)
+    min_horizon_hours: int = Field(
+        default=12, ge=1
+    )  # min available leads to still publish; else retry
     lag_hours: int = Field(ge=0)
     feature_groups: FeatureGroupSwitches
     label: LabelConfig
     training: TrainingConfig
     output: OutputConfig
+
+    @model_validator(mode="after")
+    def _min_horizon_within_horizon(self) -> DeploymentConfig:
+        if self.min_horizon_hours > self.horizon_hours:
+            raise ValueError(
+                f"min_horizon_hours ({self.min_horizon_hours}) must be <= "
+                f"horizon_hours ({self.horizon_hours})"
+            )
+        return self

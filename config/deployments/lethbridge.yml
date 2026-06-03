@@ -61,6 +61,7 @@ nwp:
   sampling: land                            # Open-Meteo cell_selection (elevation-aware land cell) — ADR-0019
 
 horizon_hours: 48
+min_horizon_hours: 12                      # publish a shorter (stale) forecast above this; else retry
 lag_hours: 6                               # recent-observation window for obs features
 
 feature_groups:
