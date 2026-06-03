@@ -155,17 +155,26 @@ def run_inference(
     observations: Mapping[str, ObservationSource],
     forecast_path: Path,
     issue_time: datetime,
+    last_updated: datetime | None = None,
     registry_path: Path | None = None,
     work_dir: Path | None = None,
     fetch_bytes: Callable[[str], bytes] = lambda url: http_get_bytes(url),
 ) -> ForecastDocument:
     """Build a snapshot → champion/baseline forecast → write JSON. Stateless (ADR-0019).
 
+    ``issue_time`` is the HRDPS model-cycle init time the forecast is built from; ``last_updated``
+    is when *this document* was (re)generated — the wall-clock publish time, defaulting to
+    ``datetime.now(UTC)`` (injectable for deterministic tests). They differ: an hourly re-run of
+    the same cycle keeps ``issue_time`` but advances ``last_updated``.
+
     When ``registry_path`` is None (or absent/unreadable), serves baseline for all tasks.
     Status precedence: ``degraded`` (an expected champion — a real registry entry — failed to
     load/predict) > ``stale`` (the snapshot horizon was truncated below ``horizon_hours``) >
     ``ok``. So even a baseline-only run is ``stale`` when truncated, and ``ok`` otherwise.
     """
+    published_at = last_updated if last_updated is not None else datetime.now(UTC)
+    if published_at.tzinfo is None:  # mirror the naive→UTC convention used for issue_time
+        published_at = published_at.replace(tzinfo=UTC)
     snapshot = build_snapshot(config, issue_time, nwp, observations)
     truncated = len(snapshot.lead_hours) < config.horizon_hours
     matrix = build_features(snapshot, config)
@@ -176,7 +185,7 @@ def run_inference(
             config,
             base,
             snapshot.issue_time,
-            last_updated=snapshot.issue_time,
+            last_updated=published_at,
             model_versions={"temp": BASELINE_VERSION, "pop": BASELINE_VERSION},
             status="stale" if truncated else "ok",
         )
@@ -207,7 +216,7 @@ def run_inference(
         config,
         frame,
         snapshot.issue_time,
-        last_updated=snapshot.issue_time,
+        last_updated=published_at,
         model_versions={"temp": tver, "pop": pver},
         status=status,
     )
