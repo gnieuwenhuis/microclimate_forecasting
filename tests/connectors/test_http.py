@@ -32,6 +32,16 @@ def _make_response(
     return resp
 
 
+@pytest.fixture(autouse=True)
+def _instant_backoff(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+    """Patch backoff sleeping away — no test in this module may sleep for real."""
+
+    def _no_sleep(_s: float) -> None:
+        pass
+
+    monkeypatch.setattr("microclimate.connectors.http._sleep", _no_sleep)
+
+
 # ---------------------------------------------------------------------------
 # Success path
 # ---------------------------------------------------------------------------
@@ -129,33 +139,6 @@ def test_http_404_raises_source_unavailable(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 # ---------------------------------------------------------------------------
-# Retry configuration (structural — no real sleeps)
-# ---------------------------------------------------------------------------
-
-
-def test_retry_adapter_is_mounted() -> None:
-    """The session has an HTTPAdapter with bounded Retry mounted on both https:// and http://."""
-    from requests.adapters import HTTPAdapter
-    from urllib3.util.retry import Retry
-
-    import microclimate.connectors.http as http_mod
-
-    https_adapter = http_mod._SESSION.get_adapter("https://example.com")  # type: ignore[reportPrivateUsage]
-    assert isinstance(https_adapter, HTTPAdapter)
-
-    https_retry: Retry = https_adapter.max_retries  # type: ignore[assignment]
-    assert isinstance(https_retry, Retry)
-    assert https_retry.total is not None
-    assert https_retry.total <= 5, "retries must be bounded (<=5)"
-
-    http_adapter = http_mod._SESSION.get_adapter("http://example.com")  # type: ignore[reportPrivateUsage]
-    assert isinstance(http_adapter, HTTPAdapter)
-
-    http_retry: Retry = http_adapter.max_retries  # type: ignore[assignment]
-    assert isinstance(http_retry, Retry)
-
-
-# ---------------------------------------------------------------------------
 # RetryError (exhausted retries) → SourceUnavailable
 # ---------------------------------------------------------------------------
 
@@ -246,3 +229,96 @@ def test_get_bytes_connection_error_raises_source_unavailable(
         http_get_bytes("https://example.com/file.grib2")
 
     assert exc_info.value.__cause__ is not None
+
+
+# ---------------------------------------------------------------------------
+# Explicit backoff loop (ADR-0020)
+# ---------------------------------------------------------------------------
+
+
+def test_transient_502_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 502 is retried; the next attempt's body is returned."""
+    mock_get = MagicMock(
+        side_effect=[_make_response("bad", status_code=502), _make_response("recovered")]
+    )
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    assert http_get("https://example.com/data") == "recovered"
+    assert mock_get.call_count == 2
+
+
+def test_backoff_sleeps_follow_schedule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A persistent 502 sleeps through the whole schedule, one attempt per slot + 1."""
+    import microclimate.connectors.http as http_mod
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("microclimate.connectors.http._sleep", sleeps.append)
+    mock_get = MagicMock(return_value=_make_response("bad", status_code=502))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    with pytest.raises(SourceUnavailable):
+        http_get("https://example.com/data")
+
+    assert sleeps == list(http_mod._BACKOFF_SCHEDULE)  # pyright: ignore[reportPrivateUsage]
+    assert mock_get.call_count == len(http_mod._BACKOFF_SCHEDULE) + 1  # pyright: ignore[reportPrivateUsage]
+
+
+def test_exhaustion_message_names_url_attempts_elapsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The give-up error carries the URL, attempt count, elapsed time, and the cause."""
+    import re
+
+    # _make_response builds a message-less HTTPError (str(exc) == ""), so attach a
+    # realistic message here — the assertion below needs the cause text to survive.
+    resp = _make_response("bad", status_code=502)
+    resp.raise_for_status.side_effect = requests.HTTPError(
+        "502 Server Error: Bad Gateway",
+        response=resp,  # type: ignore[call-arg]
+    )
+    mock_get = MagicMock(return_value=resp)
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    with pytest.raises(SourceUnavailable) as exc_info:
+        http_get("https://example.com/data")
+
+    msg = str(exc_info.value)
+    assert "https://example.com/data" in msg
+    assert "6 attempts" in msg
+    assert re.search(r"over \d+s", msg), msg
+    assert "502" in msg
+
+
+def test_http_404_fails_immediately_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """4xx won't heal: exactly one attempt, no sleeping."""
+    sleeps: list[float] = []
+    monkeypatch.setattr("microclimate.connectors.http._sleep", sleeps.append)
+    mock_get = MagicMock(return_value=_make_response("nope", status_code=404))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    with pytest.raises(SourceUnavailable):
+        http_get("https://example.com/data")
+
+    assert mock_get.call_count == 1
+    assert sleeps == []
+
+
+def test_connection_error_retries_like_5xx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Connection errors are transient: the full schedule is consumed before giving up."""
+    import microclimate.connectors.http as http_mod
+
+    mock_get = MagicMock(side_effect=requests.ConnectionError("refused"))
+    monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
+
+    with pytest.raises(SourceUnavailable):
+        http_get("https://example.com/data")
+
+    assert mock_get.call_count == len(http_mod._BACKOFF_SCHEDULE) + 1  # pyright: ignore[reportPrivateUsage]
+
+
+def test_backoff_schedule_is_bounded() -> None:
+    """Total backoff stays within the ~2-3 min budget (spec) — bounded, not unbounded."""
+    import microclimate.connectors.http as http_mod
+
+    total = sum(http_mod._BACKOFF_SCHEDULE)  # pyright: ignore[reportPrivateUsage]
+    assert 60 <= total <= 300
