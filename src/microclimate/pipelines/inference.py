@@ -265,7 +265,9 @@ def main() -> None:
         )
         print(message)
         if os.environ.get("GITHUB_ACTIONS"):
-            print(f"::warning title=inference skipped ({args.deployment})::{message}")
+            # GitHub annotation data must be %-escaped or a multiline cause truncates it.
+            escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::warning title=inference skipped ({args.deployment})::{escaped}")
 
 
 if __name__ == "__main__":

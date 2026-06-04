@@ -68,7 +68,9 @@ def test_cli_forecast_unavailable_exits_zero(
 
     inference.main()
 
-    assert "upstream unavailable" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "upstream unavailable" in out
+    assert "no leads available for issue_time" in out
 
 
 def test_cli_emits_github_warning_annotation_under_actions(
@@ -88,6 +90,26 @@ def test_cli_emits_github_warning_annotation_under_actions(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     inference.main()
     assert "::warning" in capsys.readouterr().out
+
+
+def test_cli_github_warning_annotation_escapes_newlines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Multiline exception messages are %-escaped so the ::warning:: annotation is not truncated."""
+    _wire_cli(monkeypatch, tmp_path)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+
+    def boom(*args: object, **kwargs: object) -> NoReturn:
+        raise SourceUnavailable("line one\nline two")
+
+    monkeypatch.setattr(inference, "run_inference", boom)
+
+    inference.main()
+
+    out = capsys.readouterr().out
+    warning_line = next(line for line in out.splitlines() if line.startswith("::warning"))
+    assert "line one%0Aline two" in warning_line
+    assert "line one\nline two" not in warning_line
 
 
 def test_cli_bug_exceptions_still_propagate(
