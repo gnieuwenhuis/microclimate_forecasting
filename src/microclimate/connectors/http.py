@@ -66,6 +66,7 @@ def _do_get(
         try:
             response = _SESSION.get(url, params=params, timeout=_TIMEOUT)
             response.raise_for_status()
+            return response
         except requests.RequestException as exc:
             if not _is_transient(exc):
                 kind = "HTTP error" if isinstance(exc, requests.HTTPError) else "request failed"
@@ -76,8 +77,6 @@ def _do_get(
                     f"gave up after {attempt} attempts over {elapsed:.0f}s fetching {url!r}: {exc}"
                 ) from exc
             _sleep(_BACKOFF_SCHEDULE[attempt - 1])
-            continue
-        return response
     raise AssertionError("unreachable: loop exits via return or raise")
 
 

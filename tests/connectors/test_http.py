@@ -107,12 +107,16 @@ def test_connection_error_raises_source_unavailable(monkeypatch: pytest.MonkeyPa
 
 
 def test_timeout_raises_source_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A requests.Timeout propagates as SourceUnavailable."""
+    """Timeout is transient: retries the full backoff schedule then raises SourceUnavailable."""
+    import microclimate.connectors.http as http_mod
+
     mock_get = MagicMock(side_effect=requests.Timeout("timed out"))
     monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
 
     with pytest.raises(SourceUnavailable):
         http_get("https://example.com/data")
+
+    assert mock_get.call_count == len(http_mod._BACKOFF_SCHEDULE) + 1  # pyright: ignore[reportPrivateUsage]
 
 
 # ---------------------------------------------------------------------------
@@ -139,20 +143,31 @@ def test_http_404_raises_source_unavailable(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 # ---------------------------------------------------------------------------
-# RetryError (exhausted retries) → SourceUnavailable
+# Non-transient RequestException subclasses → immediate SourceUnavailable
 # ---------------------------------------------------------------------------
 
 
-def test_retry_error_raises_source_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An exhausted-retry requests.RetryError propagates as SourceUnavailable."""
+def test_other_request_exception_fails_immediately_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A RequestException that is neither HTTPError, ConnectionError, nor Timeout is
+    non-transient and must fail immediately (exactly 1 attempt, zero sleeps, __cause__ set).
+
+    RetryError is used as the concrete exemplar here — it stands in for any
+    RequestException subclass not matched by _is_transient.
+    """
     from requests.exceptions import RetryError
 
+    sleeps: list[float] = []
+    monkeypatch.setattr("microclimate.connectors.http._sleep", sleeps.append)
     mock_get = MagicMock(side_effect=RetryError("Max retries exceeded"))
     monkeypatch.setattr("microclimate.connectors.http._SESSION.get", mock_get)
 
     with pytest.raises(SourceUnavailable) as exc_info:
         http_get("https://example.com/data")
 
+    assert mock_get.call_count == 1
+    assert sleeps == []
     assert exc_info.value.__cause__ is not None
 
 
