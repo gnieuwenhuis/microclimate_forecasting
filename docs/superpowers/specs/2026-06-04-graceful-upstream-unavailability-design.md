@@ -39,7 +39,7 @@ backoff loop in `_do_get`:
 - **Do not retry on:** 4xx (won't heal) or other request errors — raise immediately.
 - **Exhaustion message:** the final `SourceUnavailable` includes the URL, the number of
   attempts, and the total elapsed retry time, e.g.
-  `Gave up after 6 attempts over 158s fetching '<url>': 502 Server Error ...` —
+  `gave up after 6 attempts over 155s fetching '<url>': 502 Server Error ...` —
   this is the payload the pipeline-level warning surfaces.
 - The schedule lives in a module constant (`_BACKOFF_SCHEDULE`); sleeping goes through a
   module-level reference monkeypatchable in tests. urllib3 `Retry` is removed so there is
