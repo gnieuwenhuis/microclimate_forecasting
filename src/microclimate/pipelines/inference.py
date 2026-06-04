@@ -18,7 +18,12 @@ import pandas as pd
 
 from microclimate.config.loader import load_deployment
 from microclimate.config.schema import DeploymentConfig
-from microclimate.connectors.base import NWPSource, ObservationSource
+from microclimate.connectors.base import (
+    ForecastUnavailable,
+    NWPSource,
+    ObservationSource,
+    SourceUnavailable,
+)
 from microclimate.connectors.http import http_get_bytes
 from microclimate.connectors.registry import get_source
 from microclimate.contracts.forecast import FORECAST_SCHEMA_VERSION, ForecastDocument, ForecastStep
@@ -239,15 +244,32 @@ def main() -> None:
     registry_path = Path(os.environ.get("REGISTRY_PATH", str(root / "registry.json")))
     work_dir = Path(os.environ.get("CHAMPION_CACHE_DIR", ".champion-cache"))
 
-    run_inference(
-        config,
-        nwp=nwp,
-        observations=observations,
-        forecast_path=root / config.output.forecast_json,
-        issue_time=issue_time,
-        registry_path=registry_path,
-        work_dir=work_dir,
-    )
+    try:
+        run_inference(
+            config,
+            nwp=nwp,
+            observations=observations,
+            forecast_path=root / config.output.forecast_json,
+            issue_time=issue_time,
+            registry_path=registry_path,
+            work_dir=work_dir,
+        )
+    except (SourceUnavailable, ForecastUnavailable) as exc:
+        # ADR-0020: upstream unavailability is expected weather, not failure. Warn, leave
+        # the published forecast non-updated, and exit 0 so the hourly Action stays green
+        # and the next run retries. Anything else is a bug and must propagate loudly.
+        message = (
+            f"inference: upstream unavailable for deployment '{args.deployment}'; "
+            f"forecast left non-updated, next hourly run retries "
+            f"({type(exc).__name__}: {exc})"
+        )
+        print(message)
+        if os.environ.get("GITHUB_ACTIONS"):
+            # GitHub annotation data must be %-escaped or a multiline cause truncates it.
+            escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            # Static title: annotation *properties* need their own escaping (':', ','),
+            # so keep the deployment id in the message body only.
+            print(f"::warning title=inference skipped::{escaped}")
 
 
 if __name__ == "__main__":
