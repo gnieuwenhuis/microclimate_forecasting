@@ -267,7 +267,9 @@ def main() -> None:
         if os.environ.get("GITHUB_ACTIONS"):
             # GitHub annotation data must be %-escaped or a multiline cause truncates it.
             escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-            print(f"::warning title=inference skipped ({args.deployment})::{escaped}")
+            # Static title: annotation *properties* need their own escaping (':', ','),
+            # so keep the deployment id in the message body only.
+            print(f"::warning title=inference skipped::{escaped}")
 
 
 if __name__ == "__main__":

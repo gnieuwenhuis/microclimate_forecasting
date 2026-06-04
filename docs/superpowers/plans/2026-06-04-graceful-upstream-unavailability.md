@@ -18,25 +18,19 @@
 
 ### Task 1: Branch setup — commit spec + plan
 
-The spec and plan exist only as untracked files in the main checkout at
-`/Users/gregn/Documents/microclimate_forecasting`. If you are in a fresh worktree they will
-be missing — copy them in.
+One-time bootstrap, already executed: at execution time the spec and plan existed only as
+untracked files in the original checkout, so the first commit on the work branch copied
+them into the worktree and committed them. Once these docs are committed (this file being
+one of them), this task is a no-op from any fresh clone.
 
 **Files:**
 - Add: `docs/superpowers/specs/2026-06-04-graceful-upstream-unavailability-design.md`
 - Add: `docs/superpowers/plans/2026-06-04-graceful-upstream-unavailability.md`
 
-- [ ] **Step 1: Ensure both docs exist in the working tree**
+- [x] **Step 1: Ensure both docs exist in the working tree** (copied from the original
+  checkout at execution time; nothing to do on a fresh clone)
 
-```bash
-mkdir -p docs/superpowers/specs docs/superpowers/plans
-[ -f docs/superpowers/specs/2026-06-04-graceful-upstream-unavailability-design.md ] || \
-  cp /Users/gregn/Documents/microclimate_forecasting/docs/superpowers/specs/2026-06-04-graceful-upstream-unavailability-design.md docs/superpowers/specs/
-[ -f docs/superpowers/plans/2026-06-04-graceful-upstream-unavailability.md ] || \
-  cp /Users/gregn/Documents/microclimate_forecasting/docs/superpowers/plans/2026-06-04-graceful-upstream-unavailability.md docs/superpowers/plans/
-```
-
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-06-04-graceful-upstream-unavailability-design.md \
