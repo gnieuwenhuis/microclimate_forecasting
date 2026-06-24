@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "deployment_id": "lethbridge",
   "issue_time": "2026-06-24T00:00:00Z",
-  "last_updated": "2026-06-24T05:36:15.342954Z",
+  "last_updated": "2026-06-24T09:54:25.856963Z",
   "status": "ok",
   "model_versions": {
     "temp": "lethbridge-temp-20260603T1457Z",
