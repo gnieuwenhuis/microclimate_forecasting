@@ -1,25 +1,25 @@
 {
   "entries": {
     "lethbridge/temp": {
-      "version": "lethbridge-temp-20260801T0257Z",
-      "release_asset_url": "https://github.com/gnieuwenhuis/microclimate_forecasting/releases/download/champion-lethbridge-temp-20260801T0257Z/lethbridge-temp-20260801T0257Z.joblib",
-      "promoted_at": "2026-08-01T02:57:28.431629Z",
+      "version": "lethbridge-temp-20260901T0406Z",
+      "release_asset_url": "https://github.com/gnieuwenhuis/microclimate_forecasting/releases/download/champion-lethbridge-temp-20260901T0406Z/lethbridge-temp-20260901T0406Z.joblib",
+      "promoted_at": "2026-09-01T04:06:33.082363Z",
       "holdout_metrics": {
-        "mae": 1.3039763231435104,
-        "baseline_mae": 1.6603196956938355,
-        "champion_mae": 1.6603196956938355,
-        "mae_skill": 0.21462334842773267
+        "mae": 1.3147076801159359,
+        "baseline_mae": 1.6717614247116586,
+        "champion_mae": 1.6717614247116586,
+        "mae_skill": 0.21357936564262237
       }
     },
     "lethbridge/pop": {
-      "version": "lethbridge-pop-20260801T0257Z",
-      "release_asset_url": "https://github.com/gnieuwenhuis/microclimate_forecasting/releases/download/champion-lethbridge-pop-20260801T0257Z/lethbridge-pop-20260801T0257Z.joblib",
-      "promoted_at": "2026-08-01T02:57:28.431629Z",
+      "version": "lethbridge-pop-20260901T0406Z",
+      "release_asset_url": "https://github.com/gnieuwenhuis/microclimate_forecasting/releases/download/champion-lethbridge-pop-20260901T0406Z/lethbridge-pop-20260901T0406Z.joblib",
+      "promoted_at": "2026-09-01T04:06:33.082363Z",
       "holdout_metrics": {
-        "brier": 0.022834819646482332,
-        "baseline_brier": 0.035018438398327474,
-        "champion_brier": 0.035018438398327474,
-        "bss": 0.34792010463913337
+        "brier": 0.02156597426677544,
+        "baseline_brier": 0.035530635367943986,
+        "champion_brier": 0.035530635367943986,
+        "bss": 0.39303156153992025
       }
     }
   }
